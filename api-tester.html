@@ -2,48 +2,278 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>RCS-Lite 接口测试页面</title>
   <style>
-    body{font-family: Arial, Helvetica, sans-serif;margin:20px}
-    label{display:inline-block;width:80px}
-    select, input[type=text], textarea{width:100%;box-sizing:border-box}
-    .row{margin-bottom:12px}
-    textarea{height:200px;font-family:monospace}
-    .resp{white-space:pre-wrap;background:#f6f6f6;padding:10px;border:1px solid #ddd}
-    button{padding:8px 12px}
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    html, body {
+      width: 360px;
+      height: 592px;
+      font-family: Arial, Helvetica, sans-serif;
+      background: #fff;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      padding: 8px;
+      font-size: 12px;
+    }
+    h2 {
+      font-size: 16px;
+      margin-bottom: 8px;
+      flex-shrink: 0;
+    }
+    h3 {
+      font-size: 13px;
+      margin-bottom: 4px;
+      margin-top: 6px;
+      flex-shrink: 0;
+    }
+    .container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      min-height: 0;
+    }
+    label {
+      display: block;
+      font-weight: bold;
+      margin-bottom: 2px;
+      font-size: 11px;
+    }
+    .row {
+      margin-bottom: 8px;
+      flex-shrink: 0;
+    }
+    select, input[type=text], textarea {
+      width: 100%;
+      padding: 4px;
+      border: 1px solid #999;
+      border-radius: 3px;
+      font-size: 11px;
+    }
+    select {
+      height: 28px;
+    }
+    input[type=text] {
+      height: 24px;
+    }
+    .row-inline {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .row-inline input {
+      flex: 1;
+      height: 24px;
+    }
+    .json-input-wrapper {
+      display: flex;
+      flex-direction: column;
+      margin-bottom: 8px;
+      flex-shrink: 0;
+      border: 1px solid #ddd;
+      border-radius: 3px;
+      padding: 6px;
+      background: #fafafa;
+      max-height: 150px;
+      overflow-y: auto;
+    }
+    .json-fields {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .json-field-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      font-size: 11px;
+    }
+    .json-field-row label {
+      min-width: 80px;
+      margin: 0;
+      margin-bottom: 0;
+      font-weight: normal;
+    }
+    .json-field-row input {
+      flex: 1;
+      height: 22px;
+      padding: 3px !important;
+      margin: 0 !important;
+    }
+    .json-field-row button {
+      width: 22px;
+      height: 22px;
+      padding: 0;
+      margin: 0;
+      font-size: 10px;
+      flex: none;
+    }
+    .array-field-container {
+      background: #fff;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+      padding: 6px;
+      margin: 6px 0;
+      font-size: 10px;
+    }
+    .array-field-title {
+      font-weight: bold;
+      margin-bottom: 4px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .array-item {
+      background: #f9f9f9;
+      border: 1px solid #ddd;
+      border-radius: 2px;
+      padding: 4px;
+      margin: 4px 0;
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+    .array-item input {
+      flex: 1;
+      height: 20px;
+      padding: 2px !important;
+      margin: 0 !important;
+      font-size: 10px;
+    }
+    .array-item button {
+      width: 20px;
+      height: 20px;
+      padding: 0 !important;
+      margin: 0 !important;
+      font-size: 9px;
+      flex: none;
+    }
+    .add-array-item {
+      display: flex;
+      gap: 4px;
+      margin-top: 4px;
+    }
+    .add-array-item input {
+      flex: 1;
+      height: 20px;
+      padding: 2px;
+      font-size: 10px;
+      border: 1px solid #999;
+      border-radius: 2px;
+    }
+    .add-array-item button {
+      width: 24px;
+      height: 20px;
+      padding: 0;
+      margin: 0;
+      font-size: 9px;
+    }
+    textarea {
+      height: 80px;
+      font-family: 'Courier New', monospace;
+      resize: none;
+      overflow-y: auto;
+      display: none;
+    }
+    .resp {
+      white-space: pre-wrap;
+      background: #f6f6f6;
+      padding: 6px;
+      border: 1px solid #ddd;
+      border-radius: 3px;
+      font-family: 'Courier New', monospace;
+      font-size: 10px;
+      overflow-y: auto;
+      flex: 0.5;
+      max-height: 48%;
+      min-height: 0;
+    }
+    button {
+      padding: 6px 10px;
+      height: 28px;
+      font-size: 11px;
+      background: #0078d4;
+      color: white;
+      border: none;
+      border-radius: 3px;
+      cursor: pointer;
+      flex: 1;
+      margin-right: 4px;
+    }
+    button:active {
+      background: #005a9e;
+    }
+    .button-group {
+      display: flex;
+      margin-bottom: 8px;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+    .button-group button {
+      margin-right: 0;
+    }
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      margin-bottom: 6px;
+      font-size: 11px;
+    }
+    .checkbox-row input[type=checkbox] {
+      margin-right: 6px;
+      width: 16px;
+      height: 16px;
+    }
+    .scroll-section {
+      overflow-y: auto;
+      flex: 1;
+      min-height: 0;
+    }
   </style>
 </head>
 <body>
   <h2>RCS-Lite 接口测试</h2>
-  <div class="row">
-    <label>目标 IP:</label>
-    <input id="ip" type="text" placeholder="例如：10.111.75.121:8182 或 http://10.111.75.121:8182" value="192.168.111.70:8182" />
+  <div class="container">
+    <div class="row">
+      <label>目标 IP:</label>
+      <input id="ip" type="text" placeholder="例如：10.111.75.121:8182" value="192.168.111.70:8182" />
+    </div>
+    <div class="row">
+      <label>接口：</label>
+      <select id="endpoint"></select>
+    </div>
+    <div class="row-inline">
+      <div style="flex: 1;">
+        <label>Method:</label>
+        <input id="method" type="text" readonly />
+      </div>
+    </div>
+    <div class="row">
+      <label>Headers:</label>
+      <input id="headers" type="text" readonly />
+    </div>
+    <div class="json-input-wrapper">
+      <label style="margin-bottom: 6px;">请求体 (JSON):</label>
+      <div id="jsonFields" class="json-fields"></div>
+      <textarea id="body" placeholder="{}">{}</textarea>
+    </div>
+    <div class="checkbox-row">
+      <input id="useProxy" type="checkbox" checked />
+      <label style="margin: 0;">使用代理</label>
+    </div>
+    <div class="button-group">
+      <button id="send">发送</button>
+      <button id="pretty">美化</button>
+    </div>
+    <h3>响应：</h3>
   </div>
-  <div class="row">
-    <label>接口：</label>
-    <select id="endpoint"></select>
-  </div>
-  <div class="row">
-    <label>Method:</label>
-    <input id="method" type="text" readonly />
-  </div>
-  <div class="row">
-    <label>Headers:</label>
-    <input id="headers" type="text" readonly />
-  </div>
-  <div class="row">
-    <label>请求体：</label>
-    <textarea id="body">{}</textarea>
-  </div>
-  <div class="row">
-    <label>代理：</label>
-    <label><input id="useProxy" type="checkbox" checked /> 使用本地代理（http://localhost:3000/proxy）</label>
-  </div>
-  <div class="row">
-    <button id="send">发送请求</button>
-    <button id="pretty">美化 JSON</button>
-  </div>
-  <h3>响应</h3>
   <div id="response" class="resp">——</div>
 
   <script>
@@ -51,7 +281,7 @@
     const endpoints = [
       {id:'agvChargeTask', name:'小车充电/取消充电', path:'/rcms/services/rest/hikRpcService/agvChargeTask', method:'POST', headers:{'Content-Type':'application/json'}, sample:{"reqCode":"31314","agvCode":"9001","action":"1"}},
       {id:'setPointEmptyState', name:'设置点位有无货架状态', path:'/rcms/services/rest/hikRpcService/setPointEmptyState', method:'POST', headers:{'Content-Type':'application/json'}, sample:{"reqCode":"","positionCode":"A1","emptyState":"1"}},
-      {id:'genAgvSchedulingTask', name:'生成任务单', path:'/rcms/services/rest/hikRpcService/genAgvSchedulingTask', method:'POST', headers:{'Content-Type':'application/json'}, sample:{"reqCode": "B0344592BD76C8F","taskTyp": "F01","positionCodePath": [{"positionCode": "003","type": "00"},{"positionCode": "002","type": "00"}]}},
+      {id:'genAgvSchedulingTask', name:'生成任务单', path:'/rcms/services/rest/hikRpcService/genAgvSchedulingTask', method:'POST', headers:{'Content-Type':'application/json'}, sample:{"reqCode": "B0344592BD76C8F","taskTyp": "A01","positionCodePath": [{"positionCode": "003","type": "00"},{"positionCode": "002","type": "00"}]}},
       {id:'cancelTask', name:'取消任务', path:'/rcms/services/rest/hikRpcService/cancelTask', method:'POST', headers:{'Content-Type':'application/json'}, sample:{"reqCode":"1541954B96B1112","taskCode":"123456","forceCancel":"1"}},
       {id:'continueTask', name:'继续执行任务', path:'/rcms/services/rest/hikRpcService/continueTask', method:'POST', headers:{'Content-Type':'application/json'}, sample:{"reqCode":"73962391d5b5ad","taskCode":"22_721EABDB-B894-4A93-925A-5310E2732940"}},
       {id:'setTaskPriority', name:'设置优先级', path:'/rcms/services/rest/hikRpcService/setTaskPriority', method:'POST', headers:{'Content-Type':'application/json'}, sample:{"reqCode":"B8A4D999457C24A1","priorities":[{"priority":"21","taskCode":"A01_xxx"}]}},
@@ -83,8 +313,239 @@
       document.getElementById('method').value = e.method;
       document.getElementById('headers').value = Object.entries(e.headers||{}).map(k=>k.join(': ')).join(' | ');
       try{
-        document.getElementById('body').value = JSON.stringify(e.sample||{}, null, 2);
-      }catch(err){document.getElementById('body').value = '{}'}
+        const sampleData = e.sample||{};
+        document.getElementById('body').value = JSON.stringify(sampleData, null, 2);
+        renderJsonFields(sampleData);
+      }catch(err){
+        document.getElementById('body').value = '{}';
+        renderJsonFields({});
+      }
+    }
+
+    function renderJsonFields(data){
+      const container = document.getElementById('jsonFields');
+      container.innerHTML = '';
+      
+      if(typeof data !== 'object' || data === null){
+        data = {};
+      }
+      
+      Object.keys(data).forEach(key => {
+        const value = data[key];
+        
+        // 特殊处理 positionCodePath 数组
+        if(key === 'positionCodePath' && Array.isArray(value)){
+          renderArrayField(container, key, value);
+        }
+        // 处理其他数组字段
+        else if(Array.isArray(value)){
+          renderSimpleField(container, key, JSON.stringify(value));
+        }
+        // 处理对象字段
+        else if(typeof value === 'object'){
+          renderSimpleField(container, key, JSON.stringify(value));
+        }
+        // 处理基本类型
+        else {
+          renderSimpleField(container, key, String(value));
+        }
+      });
+      
+      // 添加新字段按钮
+      const addRow = document.createElement('div');
+      addRow.style.marginTop = '6px';
+      addRow.style.display = 'flex';
+      addRow.style.gap = '4px';
+      addRow.innerHTML = `
+        <input type="text" id="newFieldName" placeholder="新字段名" style="flex:1; height:22px; padding:3px;" />
+        <button id="addFieldBtn" style="width:24px; height:22px; padding:0; margin:0; font-size:10px;">+</button>
+      `;
+      container.appendChild(addRow);
+      
+      document.getElementById('addFieldBtn').addEventListener('click', () => {
+        const fieldName = document.getElementById('newFieldName').value.trim();
+        if(!fieldName){alert('请输入字段名'); return}
+        renderSimpleField(container, fieldName, '');
+        addRow.parentNode.insertBefore(addRow, addRow.nextSibling);
+        document.getElementById('newFieldName').value = '';
+        updateJsonBody();
+      });
+    }
+
+    function renderSimpleField(container, key, displayValue){
+      const row = document.createElement('div');
+      row.className = 'json-field-row';
+      row.innerHTML = `
+        <label>${key}:</label>
+        <input type="text" class="json-value" data-key="${key}" value="${escapeHtml(displayValue)}" />
+        <button class="remove-field" type="button">-</button>
+      `;
+      
+      row.querySelector('.remove-field').addEventListener('click', () => {
+        row.remove();
+        updateJsonBody();
+      });
+      
+      row.querySelector('.json-value').addEventListener('change', () => {
+        updateJsonBody();
+      });
+      
+      container.appendChild(row);
+    }
+
+    function renderArrayField(container, key, value){
+      const wrapper = document.createElement('div');
+      wrapper.className = 'array-field-container';
+      wrapper.dataset.arrayKey = key;
+      
+      wrapper.innerHTML = `
+        <div class="array-field-title">
+          <span>${key}: (数组)</span>
+          <button class="remove-field" type="button" style="width:20px; height:20px; font-size:9px;">×</button>
+        </div>
+        <div class="array-items-container"></div>
+      `;
+      
+      const itemsContainer = wrapper.querySelector('.array-items-container');
+      
+      // 渲染已有的数组项
+      if(Array.isArray(value)){
+        value.forEach((item, idx) => {
+          renderArrayItem(itemsContainer, key, idx, item);
+        });
+      }
+      
+      // 添加新项按钮
+      const addBtn = document.createElement('div');
+      addBtn.className = 'add-array-item';
+      addBtn.innerHTML = `
+        <button id="addArrayItem_${key}" style="flex:1; height:20px; font-size:10px;">+ 添加项</button>
+      `;
+      itemsContainer.appendChild(addBtn);
+      
+      addBtn.querySelector(`#addArrayItem_${key}`).addEventListener('click', () => {
+        const newItem = {positionCode: '', type: ''};
+        renderArrayItem(itemsContainer, key, itemsContainer.children.length - 1, newItem);
+        addBtn.parentNode.insertBefore(addBtn, addBtn.nextSibling);
+        updateJsonBody();
+      });
+      
+      wrapper.querySelector('.remove-field').addEventListener('click', () => {
+        wrapper.remove();
+        updateJsonBody();
+      });
+      
+      container.appendChild(wrapper);
+    }
+
+    function renderArrayItem(container, arrayKey, itemIdx, item){
+      const itemDiv = document.createElement('div');
+      itemDiv.className = 'array-item';
+      itemDiv.dataset.arrayKey = arrayKey;
+      itemDiv.dataset.itemIndex = itemIdx;
+      
+      // 为对象数组项渲染多个输入框
+      if(typeof item === 'object' && item !== null){
+        const keys = Object.keys(item);
+        itemDiv.innerHTML = keys.map(k => `
+          <input type="text" class="array-item-field" data-field="${k}" value="${escapeHtml(String(item[k]))}" placeholder="${k}" />
+        `).join('');
+        itemDiv.innerHTML += `<button class="remove-item" type="button">-</button>`;
+        
+        itemDiv.querySelectorAll('.array-item-field').forEach(input => {
+          input.addEventListener('change', () => {
+            updateJsonBody();
+          });
+        });
+      } else {
+        itemDiv.innerHTML = `
+          <input type="text" class="array-item-field" data-field="0" value="${escapeHtml(String(item))}" />
+          <button class="remove-item" type="button">-</button>
+        `;
+        itemDiv.querySelector('.array-item-field').addEventListener('change', () => {
+          updateJsonBody();
+        });
+      }
+      
+      itemDiv.querySelector('.remove-item').addEventListener('click', () => {
+        itemDiv.remove();
+        updateJsonBody();
+      });
+      
+      // 插入到添加按钮之前
+      const addBtn = container.querySelector('.add-array-item');
+      if(addBtn){
+        container.insertBefore(itemDiv, addBtn);
+      } else {
+        container.appendChild(itemDiv);
+      }
+    }
+
+    function updateJsonBody(){
+      const obj = {};
+      
+      // 处理简单字段（保留字符串，不再自动把纯数字字符串转换为数字）
+      document.querySelectorAll('.json-field-row .json-value').forEach(field => {
+        const key = field.dataset.key;
+        let value = field.value.trim();
+
+        // 尝试解析为JSON（数组或对象）或布尔值；其他全部保留为字符串
+        if (value === 'true' || value === 'false') {
+          obj[key] = value === 'true';
+        } else if (value.startsWith('[') || value.startsWith('{')) {
+          try {
+            obj[key] = JSON.parse(value);
+          } catch (e) {
+            obj[key] = value;
+          }
+        } else {
+          obj[key] = value;
+        }
+      });
+      
+      // 处理数组字段
+      document.querySelectorAll('.array-field-container').forEach(container => {
+        const arrayKey = container.dataset.arrayKey;
+        const arrayItems = [];
+        
+        container.querySelectorAll('.array-item').forEach(item => {
+          const fields = item.querySelectorAll('.array-item-field');
+          if(fields.length === 1){
+            // 简单值数组
+            arrayItems.push(fields[0].value);
+          } else {
+            // 对象数组
+            const itemObj = {};
+            fields.forEach(field => {
+              const fieldName = field.dataset.field;
+              const fieldValue = field.value.trim();
+
+              // 尝试解析对象/数组或布尔；其余保留为字符串
+              if (fieldValue === 'true' || fieldValue === 'false') {
+                itemObj[fieldName] = fieldValue === 'true';
+              } else if (fieldValue.startsWith('[') || fieldValue.startsWith('{')) {
+                try {
+                  itemObj[fieldName] = JSON.parse(fieldValue);
+                } catch (e) {
+                  itemObj[fieldName] = fieldValue;
+                }
+              } else {
+                itemObj[fieldName] = fieldValue;
+              }
+            });
+            arrayItems.push(itemObj);
+          }
+        });
+        
+        obj[arrayKey] = arrayItems;
+      });
+      
+      document.getElementById('body').value = JSON.stringify(obj, null, 2);
+    }
+
+    function escapeHtml(text){
+      const map = {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'};
+      return String(text).replace(/[&<>"']/g, m => map[m]);
     }
 
     sel.addEventListener('change', ()=> loadEndpoint(sel.value));
@@ -96,6 +557,9 @@
     });
 
     document.getElementById('send').addEventListener('click', async ()=>{
+      // 先更新body确保使用最新的JSON
+      updateJsonBody();
+      
       const ip = document.getElementById('ip').value.trim();
       if(!ip){alert('请填写目标 IP:PORT');return}
       const e = endpoints[sel.value];
