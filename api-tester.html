@@ -82,7 +82,7 @@
       border-radius: 3px;
       padding: 6px;
       background: #fafafa;
-      max-height: 150px;
+      max-height: 210px;
       overflow-y: auto;
     }
     .json-fields {
@@ -192,8 +192,8 @@
       font-family: 'Courier New', monospace;
       font-size: 10px;
       overflow-y: auto;
-      flex: 0.5;
-      max-height: 48%;
+      flex: 0.125;
+      max-height: 12%;
       min-height: 0;
     }
     button {
@@ -264,10 +264,6 @@
       <div id="jsonFields" class="json-fields"></div>
       <textarea id="body" placeholder="{}">{}</textarea>
     </div>
-    <div class="checkbox-row">
-      <input id="useProxy" type="checkbox" checked />
-      <label style="margin: 0;">使用代理</label>
-    </div>
     <div class="button-group">
       <button id="send">发送</button>
       <button id="pretty">美化</button>
@@ -279,9 +275,9 @@
   <script>
     // 提取自文档的接口列表（精简）
     const endpoints = [
+      {id:'genAgvSchedulingTask', name:'生成任务单', path:'/rcms/services/rest/hikRpcService/genAgvSchedulingTask', method:'POST', headers:{'Content-Type':'application/json'}, sample:{"reqCode": "B0344592BD76C8F","taskTyp": "A01","positionCodePath": [{"positionCode": "003","type": "00"},{"positionCode": "002","type": "00"}]}},
       {id:'agvChargeTask', name:'小车充电/取消充电', path:'/rcms/services/rest/hikRpcService/agvChargeTask', method:'POST', headers:{'Content-Type':'application/json'}, sample:{"reqCode":"31314","agvCode":"9001","action":"1"}},
       {id:'setPointEmptyState', name:'设置点位有无货架状态', path:'/rcms/services/rest/hikRpcService/setPointEmptyState', method:'POST', headers:{'Content-Type':'application/json'}, sample:{"reqCode":"","positionCode":"A1","emptyState":"1"}},
-      {id:'genAgvSchedulingTask', name:'生成任务单', path:'/rcms/services/rest/hikRpcService/genAgvSchedulingTask', method:'POST', headers:{'Content-Type':'application/json'}, sample:{"reqCode": "B0344592BD76C8F","taskTyp": "A01","positionCodePath": [{"positionCode": "003","type": "00"},{"positionCode": "002","type": "00"}]}},
       {id:'cancelTask', name:'取消任务', path:'/rcms/services/rest/hikRpcService/cancelTask', method:'POST', headers:{'Content-Type':'application/json'}, sample:{"reqCode":"1541954B96B1112","taskCode":"123456","forceCancel":"1"}},
       {id:'continueTask', name:'继续执行任务', path:'/rcms/services/rest/hikRpcService/continueTask', method:'POST', headers:{'Content-Type':'application/json'}, sample:{"reqCode":"73962391d5b5ad","taskCode":"22_721EABDB-B894-4A93-925A-5310E2732940"}},
       {id:'setTaskPriority', name:'设置优先级', path:'/rcms/services/rest/hikRpcService/setTaskPriority', method:'POST', headers:{'Content-Type':'application/json'}, sample:{"reqCode":"B8A4D999457C24A1","priorities":[{"priority":"21","taskCode":"A01_xxx"}]}},
@@ -314,6 +310,12 @@
       document.getElementById('headers').value = Object.entries(e.headers||{}).map(k=>k.join(': ')).join(' | ');
       try{
         const sampleData = e.sample||{};
+        
+        // 如果是生成任务单接口，自动生成reqCode为时间戳
+        if(e.id === 'genAgvSchedulingTask'){
+          sampleData.reqCode = String(Date.now());
+        }
+        
         document.getElementById('body').value = JSON.stringify(sampleData, null, 2);
         renderJsonFields(sampleData);
       }catch(err){
@@ -444,13 +446,33 @@
       itemDiv.dataset.arrayKey = arrayKey;
       itemDiv.dataset.itemIndex = itemIdx;
       
-      // 为对象数组项渲染多个输入框
+      // 为对象数组项渲染多个输入框或下拉框
       if(typeof item === 'object' && item !== null){
         const keys = Object.keys(item);
-        itemDiv.innerHTML = keys.map(k => `
-          <input type="text" class="array-item-field" data-field="${k}" value="${escapeHtml(String(item[k]))}" placeholder="${k}" />
-        `).join('');
-        itemDiv.innerHTML += `<button class="remove-item" type="button">-</button>`;
+        
+        let htmlContent = '';
+        keys.forEach(k => {
+          if(k === 'positionCode' && arrayKey === 'positionCodePath'){
+            // positionCodePath中的positionCode使用下拉框
+            const options = [];
+            for(let i = 1; i <= 5; i++){
+              for(let j = 1; j <= 4; j++){
+                options.push(String(i*1000 + j));
+              }
+            }
+            htmlContent += `<select class="array-item-field" data-field="${k}" style="flex:1; height:20px; padding:2px; font-size:10px;">`;
+            options.forEach(opt => {
+              const selected = String(item[k]) === opt ? 'selected' : '';
+              htmlContent += `<option value="${opt}" ${selected}>${opt}</option>`;
+            });
+            htmlContent += '</select>';
+          } else {
+            // 其他字段使用输入框
+            htmlContent += `<input type="text" class="array-item-field" data-field="${k}" value="${escapeHtml(String(item[k]))}" placeholder="${k}" style="flex:1; height:20px; padding:2px; margin:0; font-size:10px;" />`;
+          }
+        });
+        htmlContent += `<button class="remove-item" type="button">-</button>`;
+        itemDiv.innerHTML = htmlContent;
         
         itemDiv.querySelectorAll('.array-item-field').forEach(input => {
           input.addEventListener('change', () => {
@@ -568,44 +590,16 @@
       let url = base + (e.path.startsWith('/')? e.path : ('/' + e.path));
       const headers = e.headers||{'Content-Type':'application/json'};
       const bodyText = document.getElementById('body').value;
-      const useProxy = document.getElementById('useProxy').checked;
-
-      if(useProxy){
-        // 通过本地代理转发，代理地址固定为 http://localhost:3000/proxy
-        const proxyUrl = 'http://localhost:3000/proxy';
-        document.getElementById('response').textContent = '通过代理请求: ' + url + '\n(正在建立连接...)';
-        try{
-          const reqBody = JSON.stringify({ 
-            url: url, 
-            method: e.method, 
-            headers: headers, 
-            body: bodyText 
-          });
-          console.log('Sending to proxy:', reqBody);
-          
-          const res = await fetch(proxyUrl, {
-            method: 'POST',
-            headers: {'Content-Type':'application/json'},
-            body: reqBody
-          });
-          const text = await res.text();
-          console.log('Proxy response:', res.status, text);
-          document.getElementById('response').textContent = res.status + ' ' + res.statusText + '\n' + text;
-        }catch(err){
-          console.error('Proxy error:', err);
-          document.getElementById('response').textContent = '代理请求失败: ' + err.message + '\n\n请确保:\n1. 代理服务器已启动 (npm start)\n2. 代理地址正确 (http://localhost:3000/proxy)\n3. 目标服务器地址正确';
-        }
-      }else{
-        let options = {method: e.method, headers: headers};
-        if(e.method === 'POST' || e.method === 'PUT') options.body = bodyText;
-        document.getElementById('response').textContent = '直接请求: ' + url;
-        try{
-          const res = await fetch(url, options);
-          const text = await res.text();
-          document.getElementById('response').textContent = res.status + ' ' + res.statusText + '\n' + text;
-        }catch(err){
-          document.getElementById('response').textContent = '请求失败: ' + err;
-        }
+      
+      let options = {method: e.method, headers: headers};
+      if(e.method === 'POST' || e.method === 'PUT') options.body = bodyText;
+      document.getElementById('response').textContent = '请求中: ' + url;
+      try{
+        const res = await fetch(url, options);
+        const text = await res.text();
+        document.getElementById('response').textContent = res.status + ' ' + res.statusText + '\n' + text;
+      }catch(err){
+        document.getElementById('response').textContent = '请求失败: ' + err;
       }
     });
   </script>
