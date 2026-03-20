@@ -120,15 +120,25 @@
     input[type=text] {
       width: 100%;
       height: 38px;
-      border: 1px solid #c9c9c9;
-      border-radius: 6px;
-      padding: 0 10px;
-      font-size: 14px;
+      border: 1px solid #d9d9d9;
       background: #fff;
+      color: #333;
+      width: 68px;
+      height: 36px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
     }
-    .json-input-wrapper {
-      display: flex;
-      flex-direction: column;
+    .stats-btn {
+      border: 1px solid #1565c0;
+      background: #1565c0;
+      color: #fff;
+      height: 36px;
+      padding: 0 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+    }
       margin-bottom: 10px;
       border: 1px solid #ddd;
       border-radius: 8px;
@@ -283,6 +293,7 @@
     <div class="detail-wrap">
       <div class="detail-header">
         <button id="backBtn" class="back-btn" type="button">返回</button>
+        <button class="stats-btn" type="button" onclick="window.open('task-stats.html?apiHost=' + encodeURIComponent(window.location.hostname || 'localhost'),'_blank')">📊 统计</button>
         <div id="detailTitle" class="detail-title">接口详情</div>
       </div>
       <div class="detail-body">
@@ -625,6 +636,30 @@
       document.getElementById('body').value = JSON.stringify(obj, null, 2);
     }
 
+    async function postTaskLog(logData) {
+      const apiCandidates = ['/api/task-log'];
+      if (/^https?:/i.test(window.location.protocol)) {
+        apiCandidates.push(window.location.origin.replace(/\/$/, '') + '/api/task-log');
+      }
+      apiCandidates.push('http://localhost:3000/api/task-log');
+
+      for (const apiUrl of apiCandidates) {
+        try {
+          const resp = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify(logData)
+          });
+          if (resp.ok) {
+            return true;
+          }
+        } catch (e) {
+          // 尝试下一个地址
+        }
+      }
+      return false;
+    }
+
     document.getElementById('backBtn').addEventListener('click', backToList);
 
     document.getElementById('pretty').addEventListener('click', () => {
@@ -681,6 +716,22 @@
         const res = await fetch(url, options);
         const text = await res.text();
         document.getElementById('response').textContent = res.status + ' ' + res.statusText + '\n' + text;
+
+        // 记录 genAgvSchedulingTask 到数据库
+        if (endpoint.id === 'genAgvSchedulingTask') {
+          const logged = await postTaskLog({
+            reqCode:       payload.reqCode || '',
+            taskTyp:       payload.taskTyp || '',
+            positionCodes: payload.positionCodePath || [],
+            rawBody:       bodyText,
+            respStatus:    res.status,
+            respBody:      text.slice(0, 500)
+          }).catch(() => false);
+
+          document.getElementById('response').textContent += logged
+            ? '\n[日志] 已写入统计数据库'
+            : '\n[日志] 写入失败（请检查 /api/task-log 连通性）';
+        }
       } catch (err) {
         document.getElementById('response').textContent = '请求失败: ' + err;
       }

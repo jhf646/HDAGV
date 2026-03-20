@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>AGV 任务统计</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="./position-code-config.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Microsoft YaHei",sans-serif;background:#f0f2f5;color:#333;font-size:14px}
+header{background:#1565c0;color:#fff;padding:12px 16px;display:flex;align-items:center;justify-content:space-between}
+header h1{font-size:18px;font-weight:700}
+header .back{background:rgba(255,255,255,.2);border:none;color:#fff;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px}
+.summary{display:flex;gap:10px;padding:12px;flex-wrap:wrap}
+.stat-card{flex:1;min-width:130px;background:#fff;border-radius:10px;padding:14px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.1)}
+.stat-card .num{font-size:28px;font-weight:700;color:#1565c0}
+.stat-card .lbl{font-size:12px;color:#888;margin-top:4px}
+.charts{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 12px 12px}
+@media(max-width:480px){.charts{grid-template-columns:1fr}}
+.chart-box{background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.1)}
+.chart-box h3{font-size:14px;color:#555;margin-bottom:8px}
+.chart-box canvas{width:100%!important}
+.table-box{background:#fff;border-radius:10px;padding:12px;margin:0 12px 16px;box-shadow:0 1px 4px rgba(0,0,0,.1);overflow-x:auto}
+.table-box h3{font-size:14px;color:#555;margin-bottom:8px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{padding:6px 8px;border-bottom:1px solid #eee;text-align:left;white-space:nowrap}
+th{background:#f5f5f5;font-weight:600;color:#555}
+tr:hover td{background:#f9f9f9}
+.resp-ok{color:#2e7d32;font-weight:600}
+.resp-err{color:#c62828;font-weight:600}
+.footer{text-align:center;padding:8px;font-size:11px;color:#bbb}
+.refresh-bar{text-align:right;padding:4px 14px;font-size:12px;color:#888}
+</style>
+</head>
+<body>
+<header>
+  <h1>📊 AGV 任务统计</h1>
+  <button class="back" onclick="goBack()">← 返回</button>
+</header>
+
+<div class="summary" id="summary">
+  <div class="stat-card"><div class="num" id="s-total">-</div><div class="lbl">总任务数</div></div>
+  <div class="stat-card"><div class="num" id="s-today">-</div><div class="lbl">今日任务</div></div>
+  <div class="stat-card"><div class="num" id="s-success" style="color:#2e7d32">-</div><div class="lbl">成功率</div></div>
+  <div class="stat-card"><div class="num" id="s-failed" style="color:#c62828">-</div><div class="lbl">失败数</div></div>
+</div>
+
+<div class="refresh-bar" id="refresh-bar">-</div>
+
+<div class="charts">
+  <div class="chart-box" style="grid-column:1/-1">
+    <h3>近 30 天每日任务量</h3>
+    <canvas id="chartDay" height="160"></canvas>
+  </div>
+  <div class="chart-box">
+    <h3>任务类型分布</h3>
+    <canvas id="chartTyp" height="180"></canvas>
+  </div>
+  <div class="chart-box">
+    <h3>成功 / 失败</h3>
+    <canvas id="chartStatus" height="180"></canvas>
+  </div>
+</div>
+
+<div class="table-box">
+  <h3>最近 20 条记录</h3>
+  <table id="tbl">
+    <thead><tr>
+      <th>时间</th><th>任务编号</th><th>发货点</th><th>收货点</th><th>状态</th><th>响应</th>
+    </tr></thead>
+    <tbody id="tbl-body"></tbody>
+  </table>
+</div>
+
+<div class="footer">每 30 秒自动刷新</div>
+
+<script>
+const qs = new URLSearchParams(window.location.search);
+const apiHostFromQuery = (qs.get('apiHost') || '').trim();
+const currentHost = (window.location.hostname || '').trim();
+const hostCandidates = [apiHostFromQuery, currentHost, 'localhost'].filter(Boolean);
+const uniqueHosts = Array.from(new Set(hostCandidates));
+
+const API_CANDIDATES = [];
+if (/^https?:$/i.test(window.location.protocol)) {
+  API_CANDIDATES.push('/api/task-stats');
+}
+uniqueHosts.forEach(host => {
+  API_CANDIDATES.push('http://' + host + ':3000/api/task-stats');
+});
+
+let chartDay, chartTyp, chartStatus;
+
+function goBack() {
+  if (window.history.length > 1) {
+    window.history.back();
+    return;
+  }
+  window.location.href = 'api-tester.html';
+}
+
+function getPositionNameMap() {
+  try {
+    const options = window.AGV_APP_CONFIG
+      ?.fieldConfig
+      ?.genAgvSchedulingTask
+      ?.positionCodePath
+      ?.positionCode;
+    if (!Array.isArray(options)) {
+      return {};
+    }
+    const map = {};
+    options.forEach(item => {
+      if (item && item.value != null && item.label) {
+        map[String(item.value)] = item.label;
+      }
+    });
+    return map;
+  } catch (e) {
+    return {};
+  }
+}
+
+const POSITION_NAME_MAP = getPositionNameMap();
+
+function toPositionName(code) {
+  const key = String(code || '').trim();
+  if (!key) {
+    return '-';
+  }
+  return POSITION_NAME_MAP[key] || key;
+}
+
+function normalizeStatsPayload(payload) {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('统计接口返回无效');
+  }
+  return {
+    byDay: Array.isArray(payload.byDay) ? payload.byDay : [],
+    byTyp: Array.isArray(payload.byTyp) ? payload.byTyp : [],
+    byStatus: payload.byStatus && typeof payload.byStatus === 'object' ? payload.byStatus : {},
+    recent: Array.isArray(payload.recent) ? payload.recent : []
+  };
+}
+
+async function fetchStats() {
+  let lastError = null;
+  for (const url of API_CANDIDATES) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        lastError = new Error('HTTP ' + res.status);
+        continue;
+      }
+      return await res.json();
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  const tried = API_CANDIDATES.join(' , ');
+  if (lastError && lastError.message) {
+    throw new Error(lastError.message + ' | 已尝试: ' + tried);
+  }
+  throw new Error('无法连接统计接口 | 已尝试: ' + tried);
+}
+
+function buildDayChart(data) {
+  const labels = data.map(r => r.day);
+  const values = data.map(r => r.cnt);
+  if (chartDay) {
+    chartDay.data.labels = labels;
+    chartDay.data.datasets[0].data = values;
+    chartDay.update();
+    return;
+  }
+  chartDay = new Chart(document.getElementById('chartDay'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{ label: '任务数', data: values,
+        backgroundColor: '#42a5f5', borderRadius: 4 }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+    }
+  });
+}
+
+function buildTypChart(data) {
+  const labels = data.map(r => r.task_typ || '未知');
+  const values = data.map(r => r.cnt);
+  const colors = ['#42a5f5','#66bb6a','#ffa726','#ef5350','#ab47bc','#26c6da'];
+  if (chartTyp) {
+    chartTyp.data.labels = labels;
+    chartTyp.data.datasets[0].data = values;
+    chartTyp.update();
+    return;
+  }
+  chartTyp = new Chart(document.getElementById('chartTyp'), {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{ data: values, backgroundColor: colors }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } }
+    }
+  });
+}
+
+function buildStatusChart(data) {
+  const labels = ['成功', '失败', '未知'];
+  const values = [data.success || 0, data.failed || 0, data.unknown || 0];
+  if (chartStatus) {
+    chartStatus.data.datasets[0].data = values;
+    chartStatus.update();
+    return;
+  }
+  chartStatus = new Chart(document.getElementById('chartStatus'), {
+    type: 'pie',
+    data: {
+      labels,
+      datasets: [{ data: values, backgroundColor: ['#66bb6a','#ef5350','#bdbdbd'] }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } }
+    }
+  });
+}
+
+function buildTable(rows) {
+  const tbody = document.getElementById('tbl-body');
+  tbody.innerHTML = '';
+  rows.forEach(r => {
+    let first = '-';
+    let second = '-';
+    try {
+      const arr = JSON.parse(r.position_codes || '[]');
+      const p1 = arr[0]?.positionCode || arr[0] || '';
+      const p2 = arr[1]?.positionCode || arr[1] || '';
+      first = toPositionName(p1);
+      second = toPositionName(p2);
+    } catch {
+      first = '-';
+      second = '-';
+    }
+    const ok = r.resp_status === 200;
+    tbody.innerHTML += `
+      <tr>
+        <td>${r.created_at}</td>
+        <td>${r.task_typ||'-'}</td>
+        <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis">${first}</td>
+        <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis">${second}</td>
+        <td class="${ok?'resp-ok':'resp-err'}">${r.resp_status}</td>
+        <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;color:#666">${r.resp_body||''}</td>
+      </tr>`;
+  });
+}
+
+async function load() {
+  try {
+    const d = normalizeStatsPayload(await fetchStats());
+
+    // 汇总卡片
+    const total = d.byStatus ? (d.byStatus.total || 0) : 0;
+    const todayStr = new Date().toISOString().slice(0,10);
+    const todayEntry = (d.byDay||[]).find(r => r.day === todayStr);
+    const todayCount = todayEntry ? todayEntry.cnt : 0;
+    const success = d.byStatus ? (d.byStatus.success || 0) : 0;
+    const failed  = d.byStatus ? (d.byStatus.failed || 0) : 0;
+    const rate = total > 0 ? Math.round(success / total * 100) + '%' : '-';
+
+    document.getElementById('s-total').textContent   = total;
+    document.getElementById('s-today').textContent   = todayCount;
+    document.getElementById('s-success').textContent = rate;
+    document.getElementById('s-failed').textContent  = failed;
+
+    buildDayChart(d.byDay || []);
+    if (d.byTyp && d.byTyp.length) buildTypChart(d.byTyp);
+    if (d.byStatus) buildStatusChart(d.byStatus);
+    if (d.recent) buildTable(d.recent);
+
+    document.getElementById('refresh-bar').textContent =
+      '最后更新：' + new Date().toLocaleTimeString('zh-CN');
+  } catch (e) {
+    document.getElementById('refresh-bar').textContent =
+      '加载失败：' + e.message + '（请启动 node proxy-server.js）';
+  }
+}
+
+load();
+setInterval(load, 30000);
+</script>
+</body>
+</html>
