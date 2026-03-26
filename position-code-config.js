@@ -67,6 +67,10 @@ window.AGV_APP_CONFIG = {
           { label: '二分厂二楼4号', value: '1004' },
           { label: '二楼测试点位', value: '6001' },
           { label: '一楼测试点位', value: '10001' },
+          { label: "一楼仓库一号", value: "10002" },
+          { label: "一楼仓库二号", value: "10003" },
+          { label: "一楼生产一号", value: "10004" },
+          { label: "一楼生产二号", value: "10005" },
         ]
       }
     }
