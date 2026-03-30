@@ -123,11 +123,9 @@
       border: 1px solid #d9d9d9;
       background: #fff;
       color: #333;
-      width: 68px;
-      height: 36px;
       border-radius: 8px;
-      cursor: pointer;
       font-size: 14px;
+      padding: 0 10px;
     }
     .stats-btn {
       border: 1px solid #1565c0;
@@ -139,6 +137,7 @@
       cursor: pointer;
       font-size: 13px;
     }
+    .json-input-wrapper {
       margin-bottom: 10px;
       border: 1px solid #ddd;
       border-radius: 8px;
@@ -279,6 +278,59 @@
       max-height: 220px;
       margin-bottom: 8px;
     }
+    .response-panel {
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background: #fff;
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+    .response-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 8px 10px;
+      border-bottom: 1px solid #eee;
+      background: #fafafa;
+    }
+    .meta-pill {
+      display: inline-flex;
+      align-items: center;
+      height: 24px;
+      border-radius: 999px;
+      padding: 0 10px;
+      font-size: 12px;
+      border: 1px solid #d9d9d9;
+      color: #333;
+      background: #fff;
+    }
+    .meta-pill.ok {
+      border-color: #b7eb8f;
+      background: #f6ffed;
+      color: #237804;
+    }
+    .meta-pill.err {
+      border-color: #ffccc7;
+      background: #fff1f0;
+      color: #a8071a;
+    }
+    .copy-btn {
+      margin-left: auto;
+      height: 26px;
+      border: 1px solid #d9d9d9;
+      background: #fff;
+      border-radius: 6px;
+      padding: 0 10px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .resp {
+      margin-bottom: 0;
+      border: none;
+      border-radius: 0;
+      max-height: 260px;
+    }
   </style>
 </head>
 <body>
@@ -308,7 +360,15 @@
           <button id="pretty" class="secondary-btn" type="button">美化</button>
         </div>
         <label>返回：</label>
-        <div id="response" class="resp">——</div>
+        <div class="response-panel">
+          <div class="response-meta">
+            <span id="respStatusPill" class="meta-pill">状态: 未请求</span>
+            <span id="respTimePill" class="meta-pill">耗时: -- ms</span>
+            <span id="logStatusPill" class="meta-pill">日志: 未记录</span>
+            <button id="copyResp" class="copy-btn" type="button">复制返回</button>
+          </div>
+          <pre id="response" class="resp">——</pre>
+        </div>
       </div>
     </div>
   </div>
@@ -326,6 +386,11 @@
     const listView = document.getElementById('listView');
     const detailView = document.getElementById('detailView');
     const interfaceList = document.getElementById('interfaceList');
+    const responseEl = document.getElementById('response');
+    const respStatusPillEl = document.getElementById('respStatusPill');
+    const respTimePillEl = document.getElementById('respTimePill');
+    const logStatusPillEl = document.getElementById('logStatusPill');
+    const LOG_QUEUE_KEY = 'agv_task_log_queue_v1';
     document.getElementById('ip').value = defaultTargetIp;
 
     function escapeHtml(text){
@@ -409,7 +474,8 @@
     function loadEndpoint(index){
       const endpoint = endpoints[index];
       document.getElementById('detailTitle').textContent = endpoint.name;
-      document.getElementById('response').textContent = '——';
+      responseEl.textContent = '——';
+      setResponseMeta('状态: 未请求', null, '日志: 未记录', 'idle');
       try {
         const sampleData = JSON.parse(JSON.stringify(endpoint.sample || {}));
         if (Object.prototype.hasOwnProperty.call(sampleData, 'reqCode')) {
@@ -636,28 +702,189 @@
       document.getElementById('body').value = JSON.stringify(obj, null, 2);
     }
 
-    async function postTaskLog(logData) {
-      const apiCandidates = ['/api/task-log'];
-      if (/^https?:/i.test(window.location.protocol)) {
-        apiCandidates.push(window.location.origin.replace(/\/$/, '') + '/api/task-log');
-      }
-      apiCandidates.push('http://localhost:3000/api/task-log');
+    function setResponseMeta(statusText, costMs, logText, statusKind){
+      respStatusPillEl.textContent = statusText || '状态: 未知';
+      respTimePillEl.textContent = '耗时: ' + (typeof costMs === 'number' ? costMs + ' ms' : '-- ms');
+      logStatusPillEl.textContent = logText || '日志: 未记录';
 
-      for (const apiUrl of apiCandidates) {
-        try {
-          const resp = await fetch(apiUrl, {
+      respStatusPillEl.className = 'meta-pill';
+      if (statusKind === 'ok') {
+        respStatusPillEl.classList.add('ok');
+      } else if (statusKind === 'err') {
+        respStatusPillEl.classList.add('err');
+      }
+
+      logStatusPillEl.className = 'meta-pill';
+      if (String(logText || '').includes('成功')) {
+        logStatusPillEl.classList.add('ok');
+      } else if (String(logText || '').includes('失败') || String(logText || '').includes('排队')) {
+        logStatusPillEl.classList.add('err');
+      }
+    }
+
+    function formatResponseText(statusLine, text, endpointId, payload){
+      let parsed = null;
+      try {
+        parsed = JSON.parse(text);
+      } catch (e) {
+        parsed = null;
+      }
+
+      let summary = '';
+      if (endpointId === 'genAgvSchedulingTask') {
+        const positionCount = Array.isArray(payload?.positionCodePath) ? payload.positionCodePath.length : 0;
+        summary = [
+          '[任务摘要]',
+          'reqCode: ' + String(payload?.reqCode || '-'),
+          'taskTyp: ' + String(payload?.taskTyp || '-'),
+          'positionCodePath 数量: ' + String(positionCount),
+          ''
+        ].join('\n');
+      }
+
+      if (parsed !== null) {
+        return summary + statusLine + '\n' + JSON.stringify(parsed, null, 2);
+      }
+      return summary + statusLine + '\n' + text;
+    }
+
+    function getLocalLogQueue(){
+      try {
+        const raw = localStorage.getItem(LOG_QUEUE_KEY);
+        const list = raw ? JSON.parse(raw) : [];
+        return Array.isArray(list) ? list : [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function setLocalLogQueue(list){
+      try {
+        localStorage.setItem(LOG_QUEUE_KEY, JSON.stringify(Array.isArray(list) ? list : []));
+      } catch (e) {
+        // localStorage 不可用时忽略
+      }
+    }
+
+    function pushLogToLocalQueue(logData){
+      const queue = getLocalLogQueue();
+      queue.push({
+        ...logData,
+        queuedAt: new Date().toISOString()
+      });
+      while (queue.length > 200) {
+        queue.shift();
+      }
+      setLocalLogQueue(queue);
+      return queue.length;
+    }
+
+    function normalizeApiHost(hostText){
+      const val = String(hostText || '').trim();
+      if (!val) return '';
+      if (/^https?:\/\//i.test(val)) return val.replace(/\/$/, '');
+      return ('http://' + val).replace(/\/$/, '');
+    }
+
+    function getLogApiCandidates(){
+      const candidates = [];
+      const hasHttpPage = /^https?:/i.test(window.location.protocol);
+      const qsApiHost = new URLSearchParams(window.location.search).get('apiHost');
+      const normalizedFromQuery = normalizeApiHost(qsApiHost);
+
+      if (hasHttpPage) {
+        candidates.push({ type: 'direct', url: window.location.origin.replace(/\/$/, '') + '/api/task-log' });
+      }
+      if (normalizedFromQuery) {
+        candidates.push({ type: 'direct', url: normalizedFromQuery + '/api/task-log' });
+      }
+      candidates.push({ type: 'direct', url: 'http://localhost:3000/api/task-log' });
+      candidates.push({ type: 'direct', url: 'http://127.0.0.1:3000/api/task-log' });
+
+      if (hasHttpPage) {
+        candidates.push({ type: 'proxy', url: window.location.origin.replace(/\/$/, '') + '/proxy' });
+      }
+
+      const unique = [];
+      const used = new Set();
+      candidates.forEach(item => {
+        const key = item.type + '::' + item.url;
+        if (!used.has(key)) {
+          used.add(key);
+          unique.push(item);
+        }
+      });
+      return unique;
+    }
+
+    async function sendLogToCandidate(candidate, logData) {
+      if (candidate.type === 'proxy') {
+        const resp = await fetch(candidate.url, {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            url: 'http://localhost:3000/api/task-log',
             method: 'POST',
             headers: {'Content-Type':'application/json'},
-            body: JSON.stringify(logData)
-          });
-          if (resp.ok) {
-            return true;
-          }
+            body: logData
+          })
+        });
+        return resp.ok;
+      }
+
+      const resp = await fetch(candidate.url, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(logData)
+      });
+      return resp.ok;
+    }
+
+    async function postTaskLog(logData) {
+      const apiCandidates = getLogApiCandidates();
+      let lastErr = '';
+      for (const candidate of apiCandidates) {
+        try {
+          const ok = await sendLogToCandidate(candidate, logData);
+          if (ok) return { ok: true, via: candidate.type + ':' + candidate.url };
         } catch (e) {
-          // 尝试下一个地址
+          lastErr = String(e && e.message ? e.message : e);
         }
       }
-      return false;
+      const queueLen = pushLogToLocalQueue(logData);
+      return {
+        ok: false,
+        queued: true,
+        queueLen,
+        error: lastErr || 'all candidates failed'
+      };
+    }
+
+    async function flushQueuedTaskLogs(){
+      const queue = getLocalLogQueue();
+      if (queue.length === 0) return { flushed: 0, left: 0 };
+
+      const apiCandidates = getLogApiCandidates();
+      const rest = [];
+      let flushed = 0;
+      for (const item of queue) {
+        let ok = false;
+        for (const candidate of apiCandidates) {
+          try {
+            ok = await sendLogToCandidate(candidate, item);
+            if (ok) break;
+          } catch (e) {
+            // 尝试下一个地址
+          }
+        }
+        if (ok) {
+          flushed += 1;
+        } else {
+          rest.push(item);
+        }
+      }
+      setLocalLogQueue(rest);
+      return { flushed, left: rest.length };
     }
 
     document.getElementById('backBtn').addEventListener('click', backToList);
@@ -711,11 +938,16 @@
         options.body = bodyText;
       }
 
-      document.getElementById('response').textContent = '请求中: ' + url;
+      responseEl.textContent = '请求中: ' + url;
+      setResponseMeta('状态: 请求中', null, '日志: 待记录', 'idle');
+      const requestStartedAt = Date.now();
       try {
         const res = await fetch(url, options);
         const text = await res.text();
-        document.getElementById('response').textContent = res.status + ' ' + res.statusText + '\n' + text;
+        const elapsed = Date.now() - requestStartedAt;
+        const statusLine = res.status + ' ' + res.statusText;
+        responseEl.textContent = formatResponseText(statusLine, text, endpoint.id, payload);
+        setResponseMeta('状态: ' + statusLine, elapsed, '日志: 非任务接口', res.ok ? 'ok' : 'err');
 
         // 记录 genAgvSchedulingTask 到数据库
         if (endpoint.id === 'genAgvSchedulingTask') {
@@ -726,15 +958,65 @@
             rawBody:       bodyText,
             respStatus:    res.status,
             respBody:      text.slice(0, 500)
-          }).catch(() => false);
+          }).catch(() => ({ ok: false, error: 'postTaskLog exception' }));
 
-          document.getElementById('response').textContent += logged
-            ? '\n[日志] 已写入统计数据库'
-            : '\n[日志] 写入失败（请检查 /api/task-log 连通性）';
+          if (logged.ok) {
+            responseEl.textContent += '\n[日志] 已写入统计数据库';
+            setResponseMeta('状态: ' + statusLine, elapsed, '日志: 写入成功', res.ok ? 'ok' : 'err');
+            flushQueuedTaskLogs();
+          } else if (logged.queued) {
+            responseEl.textContent += '\n[日志] 在线写入失败，已进入本地排队（待自动补写），队列: ' + logged.queueLen;
+            setResponseMeta('状态: ' + statusLine, elapsed, '日志: 排队补写中', res.ok ? 'ok' : 'err');
+          } else {
+            responseEl.textContent += '\n[日志] 写入失败: ' + String(logged.error || 'unknown');
+            setResponseMeta('状态: ' + statusLine, elapsed, '日志: 写入失败', res.ok ? 'ok' : 'err');
+          }
         }
       } catch (err) {
-        document.getElementById('response').textContent = '请求失败: ' + err;
+        const elapsed = Date.now() - requestStartedAt;
+        responseEl.textContent = '请求失败: ' + err;
+        setResponseMeta('状态: 请求失败', elapsed, '日志: 未记录', 'err');
+
+        if (endpoint.id === 'genAgvSchedulingTask') {
+          const logged = await postTaskLog({
+            reqCode:       payload.reqCode || '',
+            taskTyp:       payload.taskTyp || '',
+            positionCodes: payload.positionCodePath || [],
+            rawBody:       bodyText,
+            respStatus:    0,
+            respBody:      String(err).slice(0, 500)
+          }).catch(() => ({ ok: false, error: 'postTaskLog exception' }));
+
+          if (logged.ok) {
+            responseEl.textContent += '\n[日志] 失败请求已写入统计数据库';
+            setResponseMeta('状态: 请求失败', elapsed, '日志: 写入成功', 'err');
+            flushQueuedTaskLogs();
+          } else if (logged.queued) {
+            responseEl.textContent += '\n[日志] 失败请求已排队，待补写，队列: ' + logged.queueLen;
+            setResponseMeta('状态: 请求失败', elapsed, '日志: 排队补写中', 'err');
+          } else {
+            responseEl.textContent += '\n[日志] 写入失败: ' + String(logged.error || 'unknown');
+            setResponseMeta('状态: 请求失败', elapsed, '日志: 写入失败', 'err');
+          }
+        }
       }
+    });
+
+    document.getElementById('copyResp').addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(responseEl.textContent || '');
+        const old = document.getElementById('copyResp').textContent;
+        document.getElementById('copyResp').textContent = '已复制';
+        setTimeout(() => {
+          document.getElementById('copyResp').textContent = old;
+        }, 1000);
+      } catch (e) {
+        alert('复制失败，请手动复制');
+      }
+    });
+
+    flushQueuedTaskLogs().catch(() => {
+      // 页面初始化时静默尝试
     });
 
     renderInterfaceList();
