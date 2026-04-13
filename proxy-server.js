@@ -3,6 +3,24 @@ const fetch = require("node-fetch");
 const app = express();
 const sql = require("mssql");
 const path = require("path");
+const fs = require("fs");
+
+const ADDRESS_CONFIG_PATH = path.join(__dirname, "request-address-config.json");
+
+function loadAddressConfig() {
+  try {
+    if (!fs.existsSync(ADDRESS_CONFIG_PATH)) {
+      return {};
+    }
+    const raw = fs.readFileSync(ADDRESS_CONFIG_PATH, "utf8");
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error("[CONFIG] request-address-config.json parse error:", err.message);
+    return {};
+  }
+}
+
+const addressConfig = loadAddressConfig();
 
 // ── SQL Server 配置 ─────────────────────────────────────────────
 const DB_NAME = "AGV_PDA_LOG";
@@ -21,6 +39,8 @@ const sqlConfig = {
 };
 
 let pool = null;
+let dbInitError = "";
+let dbLastReadyAt = "";
 
 async function getPool() {
   if (pool) return pool;
@@ -57,12 +77,17 @@ async function getPool() {
     )
   `);
 
+  dbInitError = "";
+  dbLastReadyAt = new Date().toISOString();
   console.log("[DB] Connected to", DB_NAME);
   return pool;
 }
 
 // 启动时初始化（失败不阻断代理本身）
-getPool().catch((err) => console.error("[DB] Init error:", err.message));
+getPool().catch((err) => {
+  dbInitError = err.message;
+  console.error("[DB] Init error:", err.message);
+});
 
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname)));
@@ -74,6 +99,35 @@ app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
   if (req.method === "OPTIONS") return res.sendStatus(200);
   next();
+});
+
+// 简单健康检查，便于跨设备确认 DB 是否连通
+app.get("/api/health", async (req, res) => {
+  try {
+    const p = await getPool();
+    await p.request().query("SELECT 1 AS ok");
+    res.json({
+      ok: true,
+      db: {
+        name: DB_NAME,
+        ready: true,
+        lastReadyAt: dbLastReadyAt || null,
+        initError: dbInitError || null,
+      },
+    });
+  } catch (err) {
+    dbInitError = err.message;
+    res.status(500).json({
+      ok: false,
+      db: {
+        name: DB_NAME,
+        ready: false,
+        lastReadyAt: dbLastReadyAt || null,
+        initError: dbInitError || null,
+      },
+      error: err.message,
+    });
+  }
 });
 
 app.post("/proxy", async (req, res) => {
@@ -207,7 +261,16 @@ app.get("/api/task-stats", async (req, res) => {
   }
 });
 
-const port = process.env.PORT || 3000;
-app.listen(port, () =>
-  console.log(`Proxy server listening on http://localhost:${port}`),
+const listenPort =
+  Number(process.env.PORT) || Number(addressConfig?.backend?.listenPort) || 3000;
+const listenHost =
+  process.env.HOST || String(addressConfig?.backend?.listenHost || "0.0.0.0");
+const announceBaseUrl =
+  String(addressConfig?.backend?.baseUrl || "").replace(/\/$/, "") ||
+  `http://localhost:${listenPort}`;
+
+app.listen(listenPort, listenHost, () =>
+  console.log(
+    `[SERVER] listening on ${listenHost}:${listenPort}, announce as ${announceBaseUrl}`,
+  ),
 );

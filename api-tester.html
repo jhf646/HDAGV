@@ -294,6 +294,46 @@
       border-bottom: 1px solid #eee;
       background: #fafafa;
     }
+    .task-meta-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      padding: 10px;
+      border-bottom: 1px solid #eee;
+      background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+    }
+    @media (max-width: 520px) {
+      .task-meta-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    .task-meta-item {
+      border: 1px solid #e6eef8;
+      border-radius: 10px;
+      padding: 8px 10px;
+      background: #fff;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-height: 54px;
+    }
+    .task-meta-label {
+      font-size: 11px;
+      color: #6b7a90;
+      line-height: 1;
+    }
+    .task-meta-value {
+      font-size: 13px;
+      font-weight: 700;
+      color: #20324a;
+      word-break: break-all;
+    }
+    .task-meta-value.ok {
+      color: #237804;
+    }
+    .task-meta-value.err {
+      color: #a8071a;
+    }
     .meta-pill {
       display: inline-flex;
       align-items: center;
@@ -345,7 +385,8 @@
     <div class="detail-wrap">
       <div class="detail-header">
         <button id="backBtn" class="back-btn" type="button">返回</button>
-        <button class="stats-btn" type="button" onclick="window.open('task-stats.html?apiHost=' + encodeURIComponent(window.location.hostname || 'localhost'),'_blank')">📊 统计</button>
+        <button id="statsBtn" class="stats-btn" type="button">📊 统计</button>
+        <button id="agvStatusBtn" class="stats-btn" type="button">🤖 AGV状态</button>
         <div id="detailTitle" class="detail-title">接口详情</div>
       </div>
       <div class="detail-body">
@@ -367,6 +408,28 @@
             <span id="logStatusPill" class="meta-pill">日志: 未记录</span>
             <button id="copyResp" class="copy-btn" type="button">复制返回</button>
           </div>
+          <div class="task-meta-grid">
+            <div class="task-meta-item">
+              <span class="task-meta-label">任务调用结果</span>
+              <span id="taskSuccessValue" class="task-meta-value">未执行</span>
+            </div>
+            <div class="task-meta-item">
+              <span class="task-meta-label">调用AGV编号</span>
+              <span id="taskAgvValue" class="task-meta-value">-</span>
+            </div>
+            <div class="task-meta-item">
+              <span class="task-meta-label">AGV地图</span>
+              <span id="taskMapValue" class="task-meta-value">-</span>
+            </div>
+            <div class="task-meta-item">
+              <span class="task-meta-label">日志写入状态</span>
+              <span id="taskLogValue" class="task-meta-value">未记录</span>
+            </div>
+            <div class="task-meta-item" style="grid-column: 1 / -1;">
+              <span class="task-meta-label">接口调用时间</span>
+              <span id="taskCallTimeValue" class="task-meta-value">-</span>
+            </div>
+          </div>
           <pre id="response" class="resp">——</pre>
         </div>
       </div>
@@ -376,6 +439,36 @@
   <script src="./position-code-config.js"></script>
   <script>
     const appConfig = window.AGV_APP_CONFIG || {};
+    const addressConfig = {
+      frontend: {},
+      backend: {}
+    };
+
+    function normalizeBaseUrl(urlText) {
+      const val = String(urlText || '').trim();
+      if (!val) return '';
+      if (/^https?:\/\//i.test(val)) return val.replace(/\/$/, '');
+      return ('http://' + val).replace(/\/$/, '');
+    }
+
+    async function loadAddressConfig(){
+      try {
+        const url = './request-address-config.json?t=' + Date.now();
+        const resp = await fetch(url, { cache: 'no-store' });
+        if (!resp.ok) return;
+        const cfg = await resp.json();
+        if (cfg && typeof cfg === 'object') {
+          addressConfig.frontend = cfg.frontend || {};
+          addressConfig.backend = cfg.backend || {};
+        }
+      } catch (e) {
+        // 配置文件不存在或无法访问时使用默认策略
+      }
+    }
+
+    function getConfiguredBackendBaseUrl() {
+      return normalizeBaseUrl(addressConfig?.backend?.baseUrl || '');
+    }
     const endpoints = Array.isArray(appConfig.endpoints) ? appConfig.endpoints : [];
     const defaultTargetIp = String(appConfig.defaultTargetIp || '192.168.111.70:8182');
     const iconPool = ['📦', '🚚', '✅', '📭', '🧭', '⚙️', '📣', '🔔', '🏗️', '🔎', '🤖', '🚨', '🧱', '🪶', '🧷', '🧪', '📬', '⛔'];
@@ -390,8 +483,22 @@
     const respStatusPillEl = document.getElementById('respStatusPill');
     const respTimePillEl = document.getElementById('respTimePill');
     const logStatusPillEl = document.getElementById('logStatusPill');
+    const taskSuccessValueEl = document.getElementById('taskSuccessValue');
+    const taskAgvValueEl = document.getElementById('taskAgvValue');
+    const taskMapValueEl = document.getElementById('taskMapValue');
+    const taskLogValueEl = document.getElementById('taskLogValue');
+    const taskCallTimeValueEl = document.getElementById('taskCallTimeValue');
     const LOG_QUEUE_KEY = 'agv_task_log_queue_v1';
     document.getElementById('ip').value = defaultTargetIp;
+
+    function formatDateTime(ts) {
+      const d = ts instanceof Date ? ts : new Date(ts);
+      const pad = (n) => String(n).padStart(2, '0');
+      return [
+        d.getFullYear(), '-', pad(d.getMonth() + 1), '-', pad(d.getDate()),
+        ' ', pad(d.getHours()), ':', pad(d.getMinutes()), ':', pad(d.getSeconds())
+      ].join('');
+    }
 
     function escapeHtml(text){
       const map = {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'};
@@ -476,6 +583,7 @@
       document.getElementById('detailTitle').textContent = endpoint.name;
       responseEl.textContent = '——';
       setResponseMeta('状态: 未请求', null, '日志: 未记录', 'idle');
+      resetTaskExecutionMeta();
       try {
         const sampleData = JSON.parse(JSON.stringify(endpoint.sample || {}));
         if (Object.prototype.hasOwnProperty.call(sampleData, 'reqCode')) {
@@ -722,6 +830,52 @@
       }
     }
 
+    function setTaskExecutionMeta({ successText, successKind, agvCode, mapText, logText, logKind, callTimeText }) {
+      if (successText !== undefined) {
+        taskSuccessValueEl.textContent = successText || '-';
+        taskSuccessValueEl.className = 'task-meta-value';
+        if (successKind === 'ok') {
+          taskSuccessValueEl.classList.add('ok');
+        } else if (successKind === 'err') {
+          taskSuccessValueEl.classList.add('err');
+        }
+      }
+
+      if (agvCode !== undefined) {
+        taskAgvValueEl.textContent = agvCode || '-';
+      }
+
+      if (mapText !== undefined) {
+        taskMapValueEl.textContent = mapText || '-';
+      }
+
+      if (logText !== undefined) {
+        taskLogValueEl.textContent = logText || '未记录';
+        taskLogValueEl.className = 'task-meta-value';
+        if (logKind === 'ok') {
+          taskLogValueEl.classList.add('ok');
+        } else if (logKind === 'err') {
+          taskLogValueEl.classList.add('err');
+        }
+      }
+
+      if (callTimeText !== undefined) {
+        taskCallTimeValueEl.textContent = callTimeText || '-';
+      }
+    }
+
+    function resetTaskExecutionMeta() {
+      setTaskExecutionMeta({
+        successText: '未执行',
+        successKind: '',
+        agvCode: '-',
+        mapText: '-',
+        logText: '未记录',
+        logKind: '',
+        callTimeText: '-',
+      });
+    }
+
     function formatResponseText(statusLine, text, endpointId, payload){
       let parsed = null;
       try {
@@ -746,6 +900,95 @@
         return summary + statusLine + '\n' + JSON.stringify(parsed, null, 2);
       }
       return summary + statusLine + '\n' + text;
+    }
+
+    function getPositionMapByCode(code) {
+      const options = fieldConfig?.genAgvSchedulingTask?.positionCodePath?.positionCode;
+      if (!Array.isArray(options)) return '';
+      const matched = options.find(item => String(item?.value || '') === String(code || ''));
+      return String(matched?.map || '').trim();
+    }
+
+    function resolveTaskMapShortName(payload) {
+      const points = Array.isArray(payload?.positionCodePath) ? payload.positionCodePath : [];
+      for (const point of points) {
+        const code = String(point?.positionCode || '').trim();
+        if (!code) continue;
+        const map = getPositionMapByCode(code);
+        if (map) return map;
+      }
+      const fromPayload = String(payload?.mapShortName || '').trim();
+      return fromPayload || 'AA';
+    }
+
+    async function fetchAgvStatusByMap(targetBase, mapShortName) {
+      const normalizedTargetBase = normalizeBaseUrl(targetBase);
+      if (!normalizedTargetBase) {
+        throw new Error('目标地址为空');
+      }
+      const targetUrl = normalizedTargetBase + '/rcms-dps/rest/queryAgvStatus';
+
+      const proxyCandidates = [];
+      const configuredBackendBase = getConfiguredBackendBaseUrl();
+      if (configuredBackendBase) {
+        proxyCandidates.push(configuredBackendBase + '/proxy');
+      }
+      if (/^https?:$/i.test(window.location.protocol)) {
+        proxyCandidates.push(window.location.origin.replace(/\/$/, '') + '/proxy');
+      }
+      proxyCandidates.push('http://localhost:3000/proxy');
+      proxyCandidates.push('http://127.0.0.1:3000/proxy');
+
+      const unique = Array.from(new Set(proxyCandidates.filter(Boolean)));
+      const body = {
+        reqCode: String(Date.now()),
+        reqTime: '',
+        clientCode: '',
+        tokenCode: '',
+        mapShortName: mapShortName,
+        robotCount: '-1'
+      };
+
+      let lastError = '';
+      for (const proxyUrl of unique) {
+        try {
+          const resp = await fetch(proxyUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              url: targetUrl,
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body
+            })
+          });
+          const text = await resp.text();
+          if (!resp.ok) {
+            lastError = 'proxy ' + proxyUrl + ' HTTP ' + resp.status + ' ' + String(text || '').slice(0, 120);
+            continue;
+          }
+          const parsed = JSON.parse(text);
+          const rows = Array.isArray(parsed?.data) ? parsed.data : [];
+          return { rows, via: proxyUrl };
+        } catch (e) {
+          lastError = 'proxy ' + proxyUrl + ' ' + String(e && e.message ? e.message : e);
+        }
+      }
+      throw new Error(lastError || 'AGV状态查询失败');
+    }
+
+    function pickAgvFromStatusRows(rows) {
+      const list = Array.isArray(rows) ? rows : [];
+      const candidates = list.filter(item => String(item?.status || '').trim() === '246');
+      if (candidates.length === 0) return null;
+
+      candidates.sort((a, b) => {
+        const ba = Number(a?.battery || 0);
+        const bb = Number(b?.battery || 0);
+        if (bb !== ba) return bb - ba;
+        return String(a?.robotCode || '').localeCompare(String(b?.robotCode || ''));
+      });
+      return candidates[0];
     }
 
     function getLocalLogQueue(){
@@ -780,10 +1023,7 @@
     }
 
     function normalizeApiHost(hostText){
-      const val = String(hostText || '').trim();
-      if (!val) return '';
-      if (/^https?:\/\//i.test(val)) return val.replace(/\/$/, '');
-      return ('http://' + val).replace(/\/$/, '');
+      return normalizeBaseUrl(hostText);
     }
 
     function getLogApiCandidates(){
@@ -791,24 +1031,50 @@
       const hasHttpPage = /^https?:/i.test(window.location.protocol);
       const qsApiHost = new URLSearchParams(window.location.search).get('apiHost');
       const normalizedFromQuery = normalizeApiHost(qsApiHost);
+      const configuredBackendBase = getConfiguredBackendBaseUrl();
+      const baseCandidates = [];
 
+      if (configuredBackendBase) {
+        baseCandidates.push(configuredBackendBase);
+      }
       if (hasHttpPage) {
-        candidates.push({ type: 'direct', url: window.location.origin.replace(/\/$/, '') + '/api/task-log' });
+        baseCandidates.push(window.location.origin.replace(/\/$/, ''));
       }
       if (normalizedFromQuery) {
-        candidates.push({ type: 'direct', url: normalizedFromQuery + '/api/task-log' });
+        baseCandidates.push(normalizedFromQuery);
       }
-      candidates.push({ type: 'direct', url: 'http://localhost:3000/api/task-log' });
-      candidates.push({ type: 'direct', url: 'http://127.0.0.1:3000/api/task-log' });
+      if (hasHttpPage && window.location.hostname) {
+        const byHost3000 = window.location.protocol + '//' + window.location.hostname + ':3000';
+        baseCandidates.push(byHost3000);
+      }
+      baseCandidates.push('http://localhost:3000');
+      baseCandidates.push('http://127.0.0.1:3000');
+
+      const uniqueBases = [];
+      const usedBases = new Set();
+      baseCandidates.forEach(base => {
+        const normalized = String(base || '').replace(/\/$/, '');
+        if (normalized && !usedBases.has(normalized)) {
+          usedBases.add(normalized);
+          uniqueBases.push(normalized);
+        }
+      });
+
+      uniqueBases.forEach(base => {
+        candidates.push({ type: 'direct', url: base + '/api/task-log' });
+      });
 
       if (hasHttpPage) {
-        candidates.push({ type: 'proxy', url: window.location.origin.replace(/\/$/, '') + '/proxy' });
+        const proxyUrl = window.location.origin.replace(/\/$/, '') + '/proxy';
+        uniqueBases.forEach(base => {
+          candidates.push({ type: 'proxy', url: proxyUrl, targetUrl: base + '/api/task-log' });
+        });
       }
 
       const unique = [];
       const used = new Set();
       candidates.forEach(item => {
-        const key = item.type + '::' + item.url;
+        const key = item.type + '::' + item.url + '::' + String(item.targetUrl || '');
         if (!used.has(key)) {
           used.add(key);
           unique.push(item);
@@ -823,13 +1089,17 @@
           method: 'POST',
           headers: {'Content-Type':'application/json'},
           body: JSON.stringify({
-            url: 'http://localhost:3000/api/task-log',
+            url: candidate.targetUrl || 'http://localhost:3000/api/task-log',
             method: 'POST',
             headers: {'Content-Type':'application/json'},
             body: logData
           })
         });
-        return resp.ok;
+        if (!resp.ok) {
+          const text = await resp.text().catch(() => '');
+          throw new Error('proxy ' + resp.status + ' ' + String(text || '').slice(0, 120));
+        }
+        return true;
       }
 
       const resp = await fetch(candidate.url, {
@@ -837,7 +1107,11 @@
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify(logData)
       });
-      return resp.ok;
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error('direct ' + resp.status + ' ' + String(text || '').slice(0, 120));
+      }
+      return true;
     }
 
     async function postTaskLog(logData) {
@@ -848,7 +1122,9 @@
           const ok = await sendLogToCandidate(candidate, logData);
           if (ok) return { ok: true, via: candidate.type + ':' + candidate.url };
         } catch (e) {
-          lastErr = String(e && e.message ? e.message : e);
+          const reason = String(e && e.message ? e.message : e);
+          const targetSuffix = candidate.targetUrl ? (' -> ' + candidate.targetUrl) : '';
+          lastErr = candidate.type + ':' + candidate.url + targetSuffix + ' | ' + reason;
         }
       }
       const queueLen = pushLogToLocalQueue(logData);
@@ -888,6 +1164,20 @@
     }
 
     document.getElementById('backBtn').addEventListener('click', backToList);
+
+    document.getElementById('statsBtn').addEventListener('click', () => {
+      const base = getConfiguredBackendBaseUrl() || window.location.origin || 'http://localhost:3000';
+      window.open('task-stats.html?apiHost=' + encodeURIComponent(base), '_blank');
+    });
+
+    document.getElementById('agvStatusBtn').addEventListener('click', () => {
+      const base = getConfiguredBackendBaseUrl() || window.location.origin || 'http://localhost:3000';
+      const targetIp = document.getElementById('ip').value || defaultTargetIp || '';
+      window.open(
+        'agv-status.html?apiHost=' + encodeURIComponent(base) + '&targetIp=' + encodeURIComponent(targetIp),
+        '_blank',
+      );
+    });
 
     document.getElementById('pretty').addEventListener('click', () => {
       try {
@@ -929,6 +1219,59 @@
         base = 'http://' + base;
       }
 
+      let selectedAgvInfo = null;
+      const callAtText = formatDateTime(new Date());
+      setTaskExecutionMeta({
+        successText: endpoint.id === 'genAgvSchedulingTask' ? '准备中' : '非任务接口',
+        successKind: '',
+        callTimeText: callAtText,
+        logText: endpoint.id === 'genAgvSchedulingTask' ? '待记录' : '不记录',
+        logKind: '',
+      });
+      if (endpoint.id === 'genAgvSchedulingTask') {
+        try {
+          const mapShortName = resolveTaskMapShortName(payload);
+          const queryResult = await fetchAgvStatusByMap(base, mapShortName);
+          const selected = pickAgvFromStatusRows(queryResult.rows);
+          if (!selected) {
+            responseEl.textContent =
+              '发送前检查失败: 当前地图 ' + mapShortName + ' 没有状态为 246 的可用AGV';
+            setResponseMeta('状态: 未发送', null, '日志: 未记录', 'err');
+            setTaskExecutionMeta({
+              successText: '失败',
+              successKind: 'err',
+              mapText: mapShortName,
+              logText: '未记录',
+              logKind: 'err',
+            });
+            return;
+          }
+
+          payload.agvCode = String(selected.robotCode || '');
+          selectedAgvInfo = {
+            robotCode: String(selected.robotCode || ''),
+            status: String(selected.status || ''),
+            battery: String(selected.battery || ''),
+            mapShortName,
+            via: queryResult.via,
+          };
+          setTaskExecutionMeta({
+            agvCode: selectedAgvInfo.robotCode,
+            mapText: selectedAgvInfo.mapShortName,
+          });
+        } catch (err) {
+          responseEl.textContent = '发送前检查失败: ' + String(err && err.message ? err.message : err);
+          setResponseMeta('状态: 未发送', null, '日志: 未记录', 'err');
+          setTaskExecutionMeta({
+            successText: '失败',
+            successKind: 'err',
+            logText: '未记录',
+            logKind: 'err',
+          });
+          return;
+        }
+      }
+
       const url = base + (endpoint.path.startsWith('/') ? endpoint.path : ('/' + endpoint.path));
       const headers = endpoint.headers || {'Content-Type':'application/json'};
       const bodyText = JSON.stringify(payload, null, 2);
@@ -939,7 +1282,23 @@
       }
 
       responseEl.textContent = '请求中: ' + url;
+      if (selectedAgvInfo) {
+        responseEl.textContent +=
+          '\n[AGV分配] 地图=' + selectedAgvInfo.mapShortName +
+          ' 选中AGV=' + selectedAgvInfo.robotCode +
+          ' 状态=' + selectedAgvInfo.status +
+          ' 电量=' + selectedAgvInfo.battery +
+          ' 查询通道=' + selectedAgvInfo.via;
+      }
       setResponseMeta('状态: 请求中', null, '日志: 待记录', 'idle');
+      if (endpoint.id === 'genAgvSchedulingTask') {
+        setTaskExecutionMeta({
+          successText: '请求中',
+          successKind: '',
+          logText: '待记录',
+          logKind: '',
+        });
+      }
       const requestStartedAt = Date.now();
       try {
         const res = await fetch(url, options);
@@ -947,7 +1306,20 @@
         const elapsed = Date.now() - requestStartedAt;
         const statusLine = res.status + ' ' + res.statusText;
         responseEl.textContent = formatResponseText(statusLine, text, endpoint.id, payload);
+        if (selectedAgvInfo) {
+          responseEl.textContent +=
+            '\n[AGV分配] 地图=' + selectedAgvInfo.mapShortName +
+            ' 调用AGV=' + selectedAgvInfo.robotCode +
+            ' 状态=' + selectedAgvInfo.status +
+            ' 电量=' + selectedAgvInfo.battery;
+        }
         setResponseMeta('状态: ' + statusLine, elapsed, '日志: 非任务接口', res.ok ? 'ok' : 'err');
+        if (endpoint.id === 'genAgvSchedulingTask') {
+          setTaskExecutionMeta({
+            successText: res.ok ? '成功' : '失败',
+            successKind: res.ok ? 'ok' : 'err',
+          });
+        }
 
         // 记录 genAgvSchedulingTask 到数据库
         if (endpoint.id === 'genAgvSchedulingTask') {
@@ -963,19 +1335,37 @@
           if (logged.ok) {
             responseEl.textContent += '\n[日志] 已写入统计数据库';
             setResponseMeta('状态: ' + statusLine, elapsed, '日志: 写入成功', res.ok ? 'ok' : 'err');
+            setTaskExecutionMeta({ logText: '写入成功', logKind: 'ok' });
             flushQueuedTaskLogs();
           } else if (logged.queued) {
             responseEl.textContent += '\n[日志] 在线写入失败，已进入本地排队（待自动补写），队列: ' + logged.queueLen;
             setResponseMeta('状态: ' + statusLine, elapsed, '日志: 排队补写中', res.ok ? 'ok' : 'err');
+            setTaskExecutionMeta({ logText: '排队补写中', logKind: 'err' });
           } else {
             responseEl.textContent += '\n[日志] 写入失败: ' + String(logged.error || 'unknown');
             setResponseMeta('状态: ' + statusLine, elapsed, '日志: 写入失败', res.ok ? 'ok' : 'err');
+            setTaskExecutionMeta({ logText: '写入失败', logKind: 'err' });
           }
         }
       } catch (err) {
         const elapsed = Date.now() - requestStartedAt;
         responseEl.textContent = '请求失败: ' + err;
+        if (selectedAgvInfo) {
+          responseEl.textContent +=
+            '\n[AGV分配] 地图=' + selectedAgvInfo.mapShortName +
+            ' 调用AGV=' + selectedAgvInfo.robotCode +
+            ' 状态=' + selectedAgvInfo.status +
+            ' 电量=' + selectedAgvInfo.battery;
+        }
         setResponseMeta('状态: 请求失败', elapsed, '日志: 未记录', 'err');
+        if (endpoint.id === 'genAgvSchedulingTask') {
+          setTaskExecutionMeta({
+            successText: '失败',
+            successKind: 'err',
+            logText: '未记录',
+            logKind: 'err',
+          });
+        }
 
         if (endpoint.id === 'genAgvSchedulingTask') {
           const logged = await postTaskLog({
@@ -990,13 +1380,16 @@
           if (logged.ok) {
             responseEl.textContent += '\n[日志] 失败请求已写入统计数据库';
             setResponseMeta('状态: 请求失败', elapsed, '日志: 写入成功', 'err');
+            setTaskExecutionMeta({ logText: '写入成功', logKind: 'ok' });
             flushQueuedTaskLogs();
           } else if (logged.queued) {
             responseEl.textContent += '\n[日志] 失败请求已排队，待补写，队列: ' + logged.queueLen;
             setResponseMeta('状态: 请求失败', elapsed, '日志: 排队补写中', 'err');
+            setTaskExecutionMeta({ logText: '排队补写中', logKind: 'err' });
           } else {
             responseEl.textContent += '\n[日志] 写入失败: ' + String(logged.error || 'unknown');
             setResponseMeta('状态: 请求失败', elapsed, '日志: 写入失败', 'err');
+            setTaskExecutionMeta({ logText: '写入失败', logKind: 'err' });
           }
         }
       }
@@ -1015,11 +1408,13 @@
       }
     });
 
-    flushQueuedTaskLogs().catch(() => {
-      // 页面初始化时静默尝试
-    });
-
-    renderInterfaceList();
+    (async () => {
+      await loadAddressConfig();
+      flushQueuedTaskLogs().catch(() => {
+        // 页面初始化时静默尝试
+      });
+      renderInterfaceList();
+    })();
   </script>
 </body>
 </html>

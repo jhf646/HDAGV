@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>AGV 状态查询</title>
+<script src="./position-code-config.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Microsoft YaHei",sans-serif;background:#f0f2f5;color:#333;font-size:14px}
+header{background:#1565c0;color:#fff;padding:12px 16px;display:flex;align-items:center;justify-content:space-between}
+header h1{font-size:18px;font-weight:700}
+header .back{background:rgba(255,255,255,.2);border:none;color:#fff;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px}
+.wrap{padding:12px}
+.panel{background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.1);margin-bottom:12px}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.field{flex:1;min-width:220px}
+label{display:block;font-size:12px;color:#666;margin-bottom:6px}
+input{width:100%;height:36px;border:1px solid #d9d9d9;border-radius:8px;padding:0 10px;font-size:14px}
+.actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn{height:36px;border:none;border-radius:8px;padding:0 14px;cursor:pointer;font-size:14px}
+.btn-primary{background:#177ddc;color:#fff}
+.btn-secondary{background:#5a6a7a;color:#fff}
+.meta{font-size:12px;color:#666}
+.meta.ok{color:#2e7d32}
+.meta.err{color:#c62828}
+.table-box{overflow:auto}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{padding:8px;border-bottom:1px solid #eee;text-align:left;white-space:nowrap}
+th{background:#f5f5f5;color:#555;font-weight:600}
+pre{background:#f8f9fb;border:1px solid #e9edf2;border-radius:8px;padding:10px;white-space:pre-wrap;word-break:break-word;max-height:320px;overflow:auto}
+@media (max-width:480px){.field{min-width:100%}}
+</style>
+</head>
+<body>
+<header>
+  <h1>🤖 AGV 状态查询</h1>
+  <button class="back" type="button" onclick="goBack()">← 返回</button>
+</header>
+<div class="wrap">
+  <div class="panel">
+    <div class="row">
+      <div class="field">
+        <label>RCS地址 (IP:PORT)</label>
+        <input id="targetIp" type="text" placeholder="例如 192.168.111.70:8182"/>
+      </div>
+      <div class="field">
+        <label>地图代号 (mapShortName)</label>
+        <input id="mapShortName" type="text" value="QQ"/>
+      </div>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label>robotCount (全部填 -1)</label>
+        <input id="robotCount" type="text" value="-1"/>
+      </div>
+      <div class="field">
+        <label>指定AGV编号(可选，逗号分隔)</label>
+        <input id="robots" type="text" placeholder="例如 111,112"/>
+      </div>
+    </div>
+    <div class="actions">
+      <button id="queryBtn" class="btn btn-primary" type="button">查询状态</button>
+      <button id="copyBtn" class="btn btn-secondary" type="button">复制返回</button>
+      <span id="meta" class="meta">未查询</span>
+    </div>
+  </div>
+
+  <div class="panel table-box">
+    <table>
+      <thead>
+        <tr>
+          <th>robotCode</th>
+          <th>status</th>
+          <th>battery</th>
+          <th>mapCode</th>
+          <th>robotIp</th>
+          <th>speed</th>
+          <th>posX</th>
+          <th>posY</th>
+          <th>podCode</th>
+          <th>stop</th>
+        </tr>
+      </thead>
+      <tbody id="agvTbody">
+        <tr><td colspan="10" style="color:#999">暂无数据</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <label style="display:block;margin-bottom:8px">原始返回</label>
+    <pre id="rawResp">——</pre>
+  </div>
+</div>
+
+<script>
+const appConfig = window.AGV_APP_CONFIG || {};
+const defaultTargetIp = String(appConfig.defaultTargetIp || '192.168.111.70:8182');
+const qs = new URLSearchParams(window.location.search);
+const addressConfig = { backend: {} };
+
+function normalizeBaseUrl(urlText) {
+  const val = String(urlText || '').trim();
+  if (!val) return '';
+  if (/^https?:\/\//i.test(val)) return val.replace(/\/$/, '');
+  return ('http://' + val).replace(/\/$/, '');
+}
+
+async function loadAddressConfig(){
+  try {
+    const resp = await fetch('./request-address-config.json?t=' + Date.now(), { cache: 'no-store' });
+    if (!resp.ok) return;
+    const cfg = await resp.json();
+    if (cfg && typeof cfg === 'object') {
+      addressConfig.backend = cfg.backend || {};
+    }
+  } catch (e) {
+    // 配置文件不可用时忽略
+  }
+}
+
+function getBackendBaseUrl() {
+  const apiHostFromQuery = normalizeBaseUrl(qs.get('apiHost') || '');
+  const fromCfg = normalizeBaseUrl(addressConfig?.backend?.baseUrl || '');
+  const fromOrigin = /^https?:$/i.test(window.location.protocol) ? window.location.origin.replace(/\/$/, '') : '';
+  return apiHostFromQuery || fromCfg || fromOrigin || 'http://localhost:3000';
+}
+
+function getProxyCandidates(){
+  const list = [];
+  const fromBase = getBackendBaseUrl();
+  if (fromBase) list.push(fromBase + '/proxy');
+  if (/^https?:$/i.test(window.location.protocol)) {
+    list.push(window.location.origin.replace(/\/$/, '') + '/proxy');
+  }
+  list.push('http://localhost:3000/proxy');
+  list.push('http://127.0.0.1:3000/proxy');
+  return Array.from(new Set(list));
+}
+
+function goBack(){
+  if (window.history.length > 1) {
+    window.history.back();
+    return;
+  }
+  window.location.href = 'api-tester.html';
+}
+
+function setMeta(text, type){
+  const el = document.getElementById('meta');
+  el.textContent = text;
+  el.className = 'meta' + (type ? (' ' + type) : '');
+}
+
+function renderRows(rows){
+  const tbody = document.getElementById('agvTbody');
+  if (!Array.isArray(rows) || rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="10" style="color:#999">无AGV状态数据</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(r => {
+    return '<tr>' +
+      '<td>' + String(r.robotCode || '') + '</td>' +
+      '<td>' + String(r.status || '') + '</td>' +
+      '<td>' + String(r.battery || '') + '</td>' +
+      '<td>' + String(r.mapCode || '') + '</td>' +
+      '<td>' + String(r.robotIp || '') + '</td>' +
+      '<td>' + String(r.speed || '') + '</td>' +
+      '<td>' + String(r.posX || '') + '</td>' +
+      '<td>' + String(r.posY || '') + '</td>' +
+      '<td>' + String(r.podCode || '') + '</td>' +
+      '<td>' + String(r.stop || '') + '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+async function queryAgvStatus(){
+  const startedAt = Date.now();
+  const targetIpRaw = document.getElementById('targetIp').value.trim();
+  const targetIp = targetIpRaw || defaultTargetIp;
+  if (!targetIp) {
+    setMeta('缺少RCS地址', 'err');
+    return;
+  }
+
+  const mapShortName = document.getElementById('mapShortName').value.trim();
+  const robotCount = document.getElementById('robotCount').value.trim();
+  const robotsText = document.getElementById('robots').value.trim();
+  const robots = robotsText
+    ? robotsText.split(',').map(s => s.trim()).filter(Boolean)
+    : [];
+
+  const payload = {
+    reqCode: String(Date.now()),
+    reqTime: '',
+    clientCode: '',
+    tokenCode: '',
+    mapShortName: mapShortName || 'QQ',
+    robotCount: robotCount || '-1'
+  };
+  if (robots.length > 0) {
+    payload.robots = robots;
+  }
+
+  let targetBase = targetIp;
+  if (!/^https?:\/\//i.test(targetBase)) {
+    targetBase = 'http://' + targetBase;
+  }
+  const targetUrl = targetBase.replace(/\/$/, '') + '/rcms-dps/rest/queryAgvStatus';
+
+  const proxyCandidates = getProxyCandidates();
+  let lastError = '';
+
+  setMeta('查询中...', '');
+  document.getElementById('rawResp').textContent = '请求中: ' + targetUrl;
+
+  for (const proxyUrl of proxyCandidates) {
+    try {
+      const resp = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: targetUrl,
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload
+        })
+      });
+
+      const text = await resp.text();
+      if (!resp.ok) {
+        lastError = 'proxy ' + proxyUrl + ' HTTP ' + resp.status + ' ' + text.slice(0, 150);
+        continue;
+      }
+
+      let data = null;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        data = { rawText: text };
+      }
+
+      document.getElementById('rawResp').textContent = JSON.stringify(data, null, 2);
+      renderRows(Array.isArray(data?.data) ? data.data : []);
+      const elapsed = Date.now() - startedAt;
+      setMeta('成功 | ' + elapsed + ' ms | via ' + proxyUrl, 'ok');
+      return;
+    } catch (e) {
+      lastError = 'proxy ' + proxyUrl + ' ' + String(e && e.message ? e.message : e);
+    }
+  }
+
+  const elapsed = Date.now() - startedAt;
+  setMeta('失败 | ' + elapsed + ' ms', 'err');
+  document.getElementById('rawResp').textContent = '查询失败: ' + (lastError || '未知错误');
+  renderRows([]);
+}
+
+document.getElementById('queryBtn').addEventListener('click', queryAgvStatus);
+
+document.getElementById('copyBtn').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(document.getElementById('rawResp').textContent || '');
+    setMeta('已复制返回内容', 'ok');
+  } catch (e) {
+    setMeta('复制失败，请手动复制', 'err');
+  }
+});
+
+(async () => {
+  await loadAddressConfig();
+  const queryTarget = qs.get('targetIp') || '';
+  document.getElementById('targetIp').value = queryTarget || defaultTargetIp;
+})();
+</script>
+</body>
+</html>
