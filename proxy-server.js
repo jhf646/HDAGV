@@ -208,6 +208,46 @@ app.post("/api/task-log", async (req, res) => {
   }
 });
 
+// ── 防重复检查：查询最近是否已有成功任务 ─────────────────────────
+app.post("/api/task-log/recent-success", async (req, res) => {
+  try {
+    const { taskTyp, fromCode, toCode, seconds } = req.body || {};
+    const winSeconds = Number(seconds) > 0 ? Number(seconds) : 30;
+    const p = await getPool();
+    const result = await p
+      .request()
+      .input("task_typ", sql.NVarChar(50), String(taskTyp || ""))
+      .input("from_code", sql.NVarChar(100), String(fromCode || ""))
+      .input("to_code", sql.NVarChar(100), String(toCode || ""))
+      .input("sec", sql.Int, winSeconds).query(`
+        SELECT TOP 1
+          CONVERT(NVARCHAR(19), created_at, 120) AS created_at,
+          req_code,
+          task_typ,
+          JSON_VALUE(position_codes, '$[0].positionCode') AS from_code,
+          JSON_VALUE(position_codes, '$[1].positionCode') AS to_code
+        FROM task_log
+        WHERE resp_status = 200
+          AND task_typ = @task_typ
+          AND JSON_VALUE(position_codes, '$[0].positionCode') = @from_code
+          AND JSON_VALUE(position_codes, '$[1].positionCode') = @to_code
+          AND created_at >= DATEADD(SECOND, -@sec, GETDATE())
+        ORDER BY id DESC
+      `);
+
+    const row = result.recordset[0] || null;
+    res.json({
+      ok: true,
+      exists: !!row,
+      windowSeconds: winSeconds,
+      row,
+    });
+  } catch (err) {
+    console.error("[DB] recent-success check error:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ── 查询统计数据 ────────────────────────────────────────────────
 app.get("/api/task-stats", async (req, res) => {
   try {

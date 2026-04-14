@@ -1136,6 +1136,74 @@
       };
     }
 
+    function getTaskFromToCodes(payload) {
+      const arr = Array.isArray(payload?.positionCodePath) ? payload.positionCodePath : [];
+      const fromCode = String(arr[0]?.positionCode || arr[0] || '').trim();
+      const toCode = String(arr[1]?.positionCode || arr[1] || '').trim();
+      return { fromCode, toCode };
+    }
+
+    function getBackendApiBaseCandidates() {
+      const hasHttpPage = /^https?:/i.test(window.location.protocol);
+      const qsApiHost = new URLSearchParams(window.location.search).get('apiHost');
+      const normalizedFromQuery = normalizeApiHost(qsApiHost);
+      const configuredBackendBase = getConfiguredBackendBaseUrl();
+      const bases = [];
+
+      if (configuredBackendBase) {
+        bases.push(configuredBackendBase);
+      }
+      if (hasHttpPage) {
+        bases.push(window.location.origin.replace(/\/$/, ''));
+      }
+      if (normalizedFromQuery) {
+        bases.push(normalizedFromQuery);
+      }
+      if (hasHttpPage && window.location.hostname) {
+        bases.push(window.location.protocol + '//' + window.location.hostname + ':3000');
+      }
+      bases.push('http://localhost:3000');
+      bases.push('http://127.0.0.1:3000');
+      return Array.from(new Set(bases.map(v => String(v || '').replace(/\/$/, '')).filter(Boolean)));
+    }
+
+    async function checkRecentSuccessfulTask(payload, seconds) {
+      const { fromCode, toCode } = getTaskFromToCodes(payload);
+      if (!fromCode || !toCode) {
+        return { ok: true, exists: false };
+      }
+
+      const reqBody = {
+        taskTyp: String(payload?.taskTyp || ''),
+        fromCode,
+        toCode,
+        seconds: Number(seconds) > 0 ? Number(seconds) : 30,
+      };
+
+      const bases = getBackendApiBaseCandidates();
+      let lastErr = '';
+      for (const base of bases) {
+        const url = base + '/api/task-log/recent-success';
+        try {
+          const resp = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(reqBody),
+          });
+          const text = await resp.text();
+          if (!resp.ok) {
+            lastErr = 'direct ' + url + ' HTTP ' + resp.status + ' ' + String(text || '').slice(0, 120);
+            continue;
+          }
+          return JSON.parse(text);
+        } catch (e) {
+          lastErr = 'direct ' + url + ' ' + String(e && e.message ? e.message : e);
+        }
+      }
+
+      throw new Error(lastErr || 'recent-success check failed');
+    }
+
     async function flushQueuedTaskLogs(){
       const queue = getLocalLogQueue();
       if (queue.length === 0) return { flushed: 0, left: 0 };
@@ -1230,6 +1298,24 @@
       });
       if (endpoint.id === 'genAgvSchedulingTask') {
         try {
+          const recent = await checkRecentSuccessfulTask(payload, 30);
+          if (recent?.exists) {
+            const createdAt = String(recent?.row?.created_at || '-');
+            responseEl.textContent =
+              '该任务已生成（30秒内防重）\n' +
+              '任务: ' + String(payload?.taskTyp || '-') +
+              ' | 路径: ' + String(getTaskFromToCodes(payload).fromCode || '-') + ' -> ' + String(getTaskFromToCodes(payload).toCode || '-') +
+              '\ncreated_at: ' + createdAt;
+            setResponseMeta('状态: 已拦截重复', null, '日志: 已存在成功记录', 'err');
+            setTaskExecutionMeta({
+              successText: '已生成',
+              successKind: 'ok',
+              logText: '已存在成功记录',
+              logKind: 'ok',
+            });
+            return;
+          }
+
           const mapShortName = resolveTaskMapShortName(payload);
           const queryResult = await fetchAgvStatusByMap(base, mapShortName);
           const selected = pickAgvFromStatusRows(queryResult.rows);

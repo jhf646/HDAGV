@@ -1,10 +1,10 @@
 {
   "frontend": {
-    "accessUrl": "http://192.168.108.108:3000"
+    "accessUrl": "http://192.168.2.38:3000"
   },
   "backend": {
-    "baseUrl": "http://192.168.111.70:3000",
-    "listenHost": "192.168.108.108",
+    "baseUrl": "http://192.168.2.38:3000",
+    "listenHost": "192.168.2.38",
     "listenPort": 3000
   }
 }
