@@ -63,16 +63,6 @@ tr:hover td{background:#f9f9f9}
   </div>
 </div>
 
-<div class="table-box">
-  <h3>最近 20 条记录</h3>
-  <table id="tbl">
-    <thead><tr>
-      <th>时间</th><th>任务编号</th><th>发货点</th><th>收货点</th><th>状态</th><th>响应</th>
-    </tr></thead>
-    <tbody id="tbl-body"></tbody>
-  </table>
-</div>
-
 <div class="footer">每 30 秒自动刷新</div>
 
 <script>
@@ -233,35 +223,6 @@ function buildStatusChart(data) {
   });
 }
 
-function buildTable(rows) {
-  const tbody = document.getElementById('tbl-body');
-  tbody.innerHTML = '';
-  rows.forEach(r => {
-    let first = '-';
-    let second = '-';
-    try {
-      const arr = JSON.parse(r.position_codes || '[]');
-      const p1 = arr[0]?.positionCode || arr[0] || '';
-      const p2 = arr[1]?.positionCode || arr[1] || '';
-      first = toPositionName(p1);
-      second = toPositionName(p2);
-    } catch {
-      first = '-';
-      second = '-';
-    }
-    const ok = r.resp_status === 200;
-    tbody.innerHTML += `
-      <tr>
-        <td>${r.created_at}</td>
-        <td>${r.task_typ||'-'}</td>
-        <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis">${first}</td>
-        <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis">${second}</td>
-        <td class="${ok?'resp-ok':'resp-err'}">${r.resp_status}</td>
-        <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;color:#666">${r.resp_body||''}</td>
-      </tr>`;
-  });
-}
-
 async function load() {
   try {
     const d = normalizeStatsPayload(await fetchStats());
@@ -283,7 +244,6 @@ async function load() {
     buildDayChart(d.byDay || []);
     if (d.byTyp && d.byTyp.length) buildTypChart(d.byTyp);
     if (d.byStatus) buildStatusChart(d.byStatus);
-    if (d.recent) buildTable(d.recent);
 
     document.getElementById('refresh-bar').textContent =
       '最后更新：' + new Date().toLocaleTimeString('zh-CN');

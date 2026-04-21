@@ -386,7 +386,7 @@
       <div class="detail-header">
         <button id="backBtn" class="back-btn" type="button">返回</button>
         <button id="statsBtn" class="stats-btn" type="button">📊 统计</button>
-        <button id="agvStatusBtn" class="stats-btn" type="button">🤖 AGV状态</button>
+        <button id="agvStatusBtn" class="stats-btn" type="button">🤖 AGV任务状态</button>
         <div id="detailTitle" class="detail-title">接口详情</div>
       </div>
       <div class="detail-body">
@@ -911,10 +911,10 @@
 
     function resolveTaskMapShortName(payload) {
       const points = Array.isArray(payload?.positionCodePath) ? payload.positionCodePath : [];
-      for (const point of points) {
-        const code = String(point?.positionCode || '').trim();
-        if (!code) continue;
-        const map = getPositionMapByCode(code);
+      const firstPoint = points[0];
+      const firstCode = String(firstPoint?.positionCode || '').trim();
+      if (firstCode) {
+        const map = getPositionMapByCode(firstCode);
         if (map) return map;
       }
       const fromPayload = String(payload?.mapShortName || '').trim();
@@ -979,7 +979,10 @@
 
     function pickAgvFromStatusRows(rows) {
       const list = Array.isArray(rows) ? rows : [];
-      const candidates = list.filter(item => String(item?.status || '').trim() === '246');
+      const candidates = list.filter(item => {
+        const status = String(item?.status || '').trim();
+        return status === '246' || status === '4';
+      });
       if (candidates.length === 0) return null;
 
       candidates.sort((a, b) => {

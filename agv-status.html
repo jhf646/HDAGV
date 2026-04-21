@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>AGV 状态查询</title>
+<title>AGV任务状态</title>
 <script src="./position-code-config.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -13,92 +13,67 @@ header h1{font-size:18px;font-weight:700}
 header .back{background:rgba(255,255,255,.2);border:none;color:#fff;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px}
 .wrap{padding:12px}
 .panel{background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.1);margin-bottom:12px}
-.row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px}
-.field{flex:1;min-width:220px}
 label{display:block;font-size:12px;color:#666;margin-bottom:6px}
-input{width:100%;height:36px;border:1px solid #d9d9d9;border-radius:8px;padding:0 10px;font-size:14px}
 .actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.btn{height:36px;border:none;border-radius:8px;padding:0 14px;cursor:pointer;font-size:14px}
-.btn-primary{background:#177ddc;color:#fff}
-.btn-secondary{background:#5a6a7a;color:#fff}
-.meta{font-size:12px;color:#666}
-.meta.ok{color:#2e7d32}
-.meta.err{color:#c62828}
+.panel-head{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.panel-head label{margin:0}
+.mini-btn{height:28px;border:1px solid #177ddc;background:#177ddc;color:#fff;border-radius:6px;padding:0 10px;font-size:12px;cursor:pointer}
+.task-meta{font-size:12px;color:#666}
+.task-record-empty{color:#999;text-align:left}
+.status-badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;line-height:1.5;border:1px solid #d9d9d9;background:#f5f5f5;color:#333}
+.status-badge.done{background:#f6ffed;border-color:#b7eb8f;color:#237804}
+.status-badge.pending{background:#fff7e6;border-color:#ffd591;color:#ad4e00}
+.action-btn{height:26px;border:1px solid #d4380d;background:#d4380d;color:#fff;border-radius:6px;padding:0 8px;font-size:12px;cursor:pointer}
+.action-btn[disabled]{opacity:.65;cursor:not-allowed}
+.action-text{font-size:12px;color:#237804;font-weight:600}
 .table-box{overflow:auto}
 table{width:100%;border-collapse:collapse;font-size:12px}
 th,td{padding:8px;border-bottom:1px solid #eee;text-align:left;white-space:nowrap}
 th{background:#f5f5f5;color:#555;font-weight:600}
-pre{background:#f8f9fb;border:1px solid #e9edf2;border-radius:8px;padding:10px;white-space:pre-wrap;word-break:break-word;max-height:320px;overflow:auto}
-@media (max-width:480px){.field{min-width:100%}}
+@media (max-width:480px){.actions{width:100%;justify-content:flex-end}}
 </style>
 </head>
 <body>
 <header>
-  <h1>🤖 AGV 状态查询</h1>
+  <h1>🤖 AGV任务状态</h1>
   <button class="back" type="button" onclick="goBack()">← 返回</button>
 </header>
 <div class="wrap">
-  <div class="panel">
-    <div class="row">
-      <div class="field">
-        <label>RCS地址 (IP:PORT)</label>
-        <input id="targetIp" type="text" placeholder="例如 192.168.111.70:8182"/>
-      </div>
-      <div class="field">
-        <label>地图代号 (mapShortName)</label>
-        <input id="mapShortName" type="text" value="QQ"/>
-      </div>
-    </div>
-    <div class="row">
-      <div class="field">
-        <label>robotCount (全部填 -1)</label>
-        <input id="robotCount" type="text" value="-1"/>
-      </div>
-      <div class="field">
-        <label>指定AGV编号(可选，逗号分隔)</label>
-        <input id="robots" type="text" placeholder="例如 111,112"/>
-      </div>
-    </div>
-    <div class="actions">
-      <button id="queryBtn" class="btn btn-primary" type="button">查询状态</button>
-      <button id="copyBtn" class="btn btn-secondary" type="button">复制返回</button>
-      <span id="meta" class="meta">未查询</span>
-    </div>
-  </div>
-
   <div class="panel table-box">
+    <div class="panel-head">
+      <label>任务记录（最近20条）</label>
+      <div class="actions" style="margin:0">
+        <span id="taskRecordMeta" class="task-meta">未加载</span>
+        <button id="refreshTaskRecordsBtn" class="mini-btn" type="button">刷新任务记录</button>
+      </div>
+    </div>
     <table>
       <thead>
         <tr>
-          <th>robotCode</th>
-          <th>status</th>
-          <th>battery</th>
-          <th>mapCode</th>
-          <th>robotIp</th>
-          <th>speed</th>
-          <th>posX</th>
-          <th>posY</th>
-          <th>podCode</th>
-          <th>stop</th>
+          <th>时间</th>
+          <th>任务编号</th>
+          <th>发货点</th>
+          <th>收货点</th>
+          <th>状态</th>
+          <th>响应</th>
+          <th>任务状态</th>
+          <th>操作</th>
         </tr>
       </thead>
-      <tbody id="agvTbody">
-        <tr><td colspan="10" style="color:#999">暂无数据</td></tr>
+      <tbody id="taskRecordTbody">
+        <tr><td colspan="8" class="task-record-empty">暂无任务记录</td></tr>
       </tbody>
     </table>
-  </div>
-
-  <div class="panel">
-    <label style="display:block;margin-bottom:8px">原始返回</label>
-    <pre id="rawResp">——</pre>
   </div>
 </div>
 
 <script>
 const appConfig = window.AGV_APP_CONFIG || {};
-const defaultTargetIp = String(appConfig.defaultTargetIp || '192.168.111.70:8182');
 const qs = new URLSearchParams(window.location.search);
 const addressConfig = { backend: {} };
+const defaultTargetIp = String(appConfig.defaultTargetIp || '192.168.111.70:8182');
+const TASK_STATUS_ENDPOINT = '/rcms/services/rest/hikRpcService/queryTaskStatus';
+const CANCEL_TASK_ENDPOINT = '/rcms/services/rest/hikRpcService/cancelTask';
 
 function normalizeBaseUrl(urlText) {
   const val = String(urlText || '').trim();
@@ -127,7 +102,15 @@ function getBackendBaseUrl() {
   return apiHostFromQuery || fromCfg || fromOrigin || 'http://localhost:3000';
 }
 
-function getProxyCandidates(){
+function getTargetRcsBaseUrl() {
+  const targetIpFromQuery = String(qs.get('targetIp') || '').trim();
+  const raw = targetIpFromQuery || defaultTargetIp || '';
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw)) return raw.replace(/\/$/, '');
+  return ('http://' + raw).replace(/\/$/, '');
+}
+
+function getProxyCandidates() {
   const list = [];
   const fromBase = getBackendBaseUrl();
   if (fromBase) list.push(fromBase + '/proxy');
@@ -139,82 +122,88 @@ function getProxyCandidates(){
   return Array.from(new Set(list));
 }
 
-function goBack(){
-  if (window.history.length > 1) {
-    window.history.back();
-    return;
+function getPositionNameMap() {
+  try {
+    const options = window.AGV_APP_CONFIG
+      ?.fieldConfig
+      ?.genAgvSchedulingTask
+      ?.positionCodePath
+      ?.positionCode;
+    if (!Array.isArray(options)) {
+      return {};
+    }
+    const map = {};
+    options.forEach(item => {
+      if (item && item.value != null && item.label) {
+        map[String(item.value)] = item.label;
+      }
+    });
+    return map;
+  } catch (e) {
+    return {};
   }
-  window.location.href = 'api-tester.html';
 }
 
-function setMeta(text, type){
-  const el = document.getElementById('meta');
-  el.textContent = text;
-  el.className = 'meta' + (type ? (' ' + type) : '');
+const POSITION_NAME_MAP = getPositionNameMap();
+
+function toPositionName(code) {
+  const key = String(code || '').trim();
+  if (!key) {
+    return '-';
+  }
+  return POSITION_NAME_MAP[key] || key;
 }
 
-function renderRows(rows){
-  const tbody = document.getElementById('agvTbody');
-  if (!Array.isArray(rows) || rows.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="10" style="color:#999">无AGV状态数据</td></tr>';
-    return;
+function getTaskStatsCandidates() {
+  const list = [];
+  const fromBase = getBackendBaseUrl();
+  if (fromBase) {
+    list.push(fromBase + '/api/task-stats');
   }
-  tbody.innerHTML = rows.map(r => {
-    return '<tr>' +
-      '<td>' + String(r.robotCode || '') + '</td>' +
-      '<td>' + String(r.status || '') + '</td>' +
-      '<td>' + String(r.battery || '') + '</td>' +
-      '<td>' + String(r.mapCode || '') + '</td>' +
-      '<td>' + String(r.robotIp || '') + '</td>' +
-      '<td>' + String(r.speed || '') + '</td>' +
-      '<td>' + String(r.posX || '') + '</td>' +
-      '<td>' + String(r.posY || '') + '</td>' +
-      '<td>' + String(r.podCode || '') + '</td>' +
-      '<td>' + String(r.stop || '') + '</td>' +
-    '</tr>';
-  }).join('');
+  if (/^https?:$/i.test(window.location.protocol)) {
+    list.push('/api/task-stats');
+    if (window.location.hostname) {
+      list.push('http://' + window.location.hostname + ':3000/api/task-stats');
+    }
+  }
+  list.push('http://localhost:3000/api/task-stats');
+  list.push('http://127.0.0.1:3000/api/task-stats');
+  return Array.from(new Set(list));
 }
 
-async function queryAgvStatus(){
-  const startedAt = Date.now();
-  const targetIpRaw = document.getElementById('targetIp').value.trim();
-  const targetIp = targetIpRaw || defaultTargetIp;
-  if (!targetIp) {
-    setMeta('缺少RCS地址', 'err');
-    return;
+function escapeHtml(text) {
+  const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+  return String(text || '').replace(/[&<>"']/g, m => map[m]);
+}
+
+function extractTaskCodeFromResp(respBody) {
+  const raw = String(respBody || '').trim();
+  if (!raw) return '';
+  try {
+    const parsed = JSON.parse(raw);
+    const taskCode = String(parsed?.data || '').trim();
+    if (taskCode) return taskCode;
+  } catch (e) {
+    // 非JSON时继续用正则尝试
   }
+  const match = raw.match(/"data"\s*:\s*"([^"]+)"/);
+  return match && match[1] ? String(match[1]).trim() : '';
+}
 
-  const mapShortName = document.getElementById('mapShortName').value.trim();
-  const robotCount = document.getElementById('robotCount').value.trim();
-  const robotsText = document.getElementById('robots').value.trim();
-  const robots = robotsText
-    ? robotsText.split(',').map(s => s.trim()).filter(Boolean)
-    : [];
+function normalizeTaskStatusLabel(rawStatus) {
+  const val = String(rawStatus == null ? '' : rawStatus).trim();
+  if (!val) return '未知';
+  return val;
+}
 
-  const payload = {
-    reqCode: String(Date.now()),
-    reqTime: '',
-    clientCode: '',
-    tokenCode: '',
-    mapShortName: mapShortName || 'QQ',
-    robotCount: robotCount || '-1'
-  };
-  if (robots.length > 0) {
-    payload.robots = robots;
-  }
+function isTaskDone(rawStatus) {
+  const val = String(rawStatus == null ? '' : rawStatus).trim().toLowerCase();
+  return val === '9' || val === 'done' || val === 'finish' || val === 'finished' || val === 'end' || val.includes('完成');
+}
 
-  let targetBase = targetIp;
-  if (!/^https?:\/\//i.test(targetBase)) {
-    targetBase = 'http://' + targetBase;
-  }
-  const targetUrl = targetBase.replace(/\/$/, '') + '/rcms-dps/rest/queryAgvStatus';
-
+async function callProxyJson(targetUrl, body) {
   const proxyCandidates = getProxyCandidates();
   let lastError = '';
-
-  setMeta('查询中...', '');
-  document.getElementById('rawResp').textContent = '请求中: ' + targetUrl;
-
   for (const proxyUrl of proxyCandidates) {
     try {
       const resp = await fetch(proxyUrl, {
@@ -224,55 +213,208 @@ async function queryAgvStatus(){
           url: targetUrl,
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: payload
+          body
         })
       });
-
       const text = await resp.text();
       if (!resp.ok) {
-        lastError = 'proxy ' + proxyUrl + ' HTTP ' + resp.status + ' ' + text.slice(0, 150);
+        lastError = 'proxy ' + proxyUrl + ' HTTP ' + resp.status + ' ' + String(text || '').slice(0, 180);
         continue;
       }
-
-      let data = null;
       try {
-        data = JSON.parse(text);
+        return JSON.parse(text);
       } catch (e) {
-        data = { rawText: text };
+        return { rawText: text };
       }
-
-      document.getElementById('rawResp').textContent = JSON.stringify(data, null, 2);
-      renderRows(Array.isArray(data?.data) ? data.data : []);
-      const elapsed = Date.now() - startedAt;
-      setMeta('成功 | ' + elapsed + ' ms | via ' + proxyUrl, 'ok');
-      return;
     } catch (e) {
       lastError = 'proxy ' + proxyUrl + ' ' + String(e && e.message ? e.message : e);
     }
   }
-
-  const elapsed = Date.now() - startedAt;
-  setMeta('失败 | ' + elapsed + ' ms', 'err');
-  document.getElementById('rawResp').textContent = '查询失败: ' + (lastError || '未知错误');
-  renderRows([]);
+  throw new Error(lastError || '代理调用失败');
 }
 
-document.getElementById('queryBtn').addEventListener('click', queryAgvStatus);
+async function batchQueryTaskStatus(taskCodes) {
+  const uniq = Array.from(new Set((taskCodes || []).map(v => String(v || '').trim()).filter(Boolean)));
+  if (uniq.length === 0) {
+    return {};
+  }
+  const targetBase = getTargetRcsBaseUrl();
+  if (!targetBase) {
+    return {};
+  }
 
-document.getElementById('copyBtn').addEventListener('click', async () => {
+  const payload = {
+    reqCode: String(Date.now()),
+    reqTime: '',
+    clientCode: '',
+    tokenCode: '',
+    agvCode: '',
+    taskCodes: uniq
+  };
+  const data = await callProxyJson(targetBase + TASK_STATUS_ENDPOINT, payload);
+  const rows = Array.isArray(data?.data) ? data.data : [];
+  const map = {};
+  rows.forEach(item => {
+    const code = String(item?.taskCode || '').trim();
+    if (code) {
+      map[code] = item;
+    }
+  });
+  return map;
+}
+
+async function cancelTaskByCode(taskCode) {
+  const targetBase = getTargetRcsBaseUrl();
+  if (!targetBase) {
+    throw new Error('缺少RCS地址');
+  }
+  const payload = {
+    reqCode: String(Date.now()),
+    reqTime: '',
+    clientCode: '',
+    tokenCode: '',
+    forceCancel: '1',
+    taskCode: String(taskCode || '').trim()
+  };
+  return await callProxyJson(targetBase + CANCEL_TASK_ENDPOINT, payload);
+}
+
+function getActionCellHtml(taskCode, rawStatus) {
+  if (!taskCode) {
+    return '<span style="color:#999">无任务单号</span>';
+  }
+  if (isTaskDone(rawStatus)) {
+    return '<span class="action-text">已完成</span>';
+  }
+  const safeCode = escapeHtml(taskCode);
+  return '<button class="action-btn" data-action="cancel-task" data-task-code="' + safeCode + '">取消任务</button>';
+}
+
+function getStatusBadgeHtml(rawStatus) {
+  const label = normalizeTaskStatusLabel(rawStatus);
+  const cls = isTaskDone(rawStatus) ? 'status-badge done' : 'status-badge pending';
+  return '<span class="' + cls + '">' + escapeHtml(label) + '</span>';
+}
+
+function renderTaskRecordRows(rows, taskStatusMap) {
+  const tbody = document.getElementById('taskRecordTbody');
+  const statusMap = taskStatusMap || {};
+  if (!Array.isArray(rows) || rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" class="task-record-empty">暂无任务记录</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = rows.map(r => {
+    let first = '-';
+    let second = '-';
+    try {
+      const arr = JSON.parse(r.position_codes || '[]');
+      const p1 = arr[0]?.positionCode || arr[0] || '';
+      const p2 = arr[1]?.positionCode || arr[1] || '';
+      first = toPositionName(p1);
+      second = toPositionName(p2);
+    } catch (e) {
+      first = '-';
+      second = '-';
+    }
+    const status = Number(r.resp_status) === 200 ? '成功' : '失败';
+    const respText = String(r.resp_body || '').slice(0, 120);
+    const taskCode = extractTaskCodeFromResp(r.resp_body || '');
+    const taskStateRaw = taskCode && statusMap[taskCode] ? statusMap[taskCode].taskStatus : '';
+    return '<tr>' +
+      '<td>' + escapeHtml(String(r.created_at || '-')) + '</td>' +
+      '<td>' + escapeHtml(String(r.task_typ || '-')) + '</td>' +
+      '<td>' + escapeHtml(first) + '</td>' +
+      '<td>' + escapeHtml(second) + '</td>' +
+      '<td>' + escapeHtml(status + ' (' + String(r.resp_status || '-') + ')') + '</td>' +
+      '<td>' + escapeHtml(respText) + '</td>' +
+      '<td>' + getStatusBadgeHtml(taskStateRaw) + '</td>' +
+      '<td>' + getActionCellHtml(taskCode, taskStateRaw) + '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+async function loadTaskRecords() {
+  const metaEl = document.getElementById('taskRecordMeta');
+  metaEl.textContent = '加载中...';
+  const candidates = getTaskStatsCandidates();
+  let lastError = '';
+
+  for (const url of candidates) {
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        lastError = 'HTTP ' + resp.status;
+        continue;
+      }
+      const payload = await resp.json();
+      const rows = Array.isArray(payload?.recent) ? payload.recent : [];
+      const taskCodes = rows.map(item => extractTaskCodeFromResp(item?.resp_body || '')).filter(Boolean);
+      let statusMap = {};
+      try {
+        statusMap = await batchQueryTaskStatus(taskCodes);
+      } catch (e) {
+        // 状态查询失败不阻断记录展示
+      }
+      renderTaskRecordRows(rows, statusMap);
+      metaEl.textContent = '已更新: ' + new Date().toLocaleTimeString('zh-CN') + ' | ' + rows.length + ' 条 | 状态同步 ' + Object.keys(statusMap).length + ' 条';
+      return;
+    } catch (e) {
+      lastError = String(e && e.message ? e.message : e);
+    }
+  }
+
+  renderTaskRecordRows([], {});
+  metaEl.textContent = '加载失败: ' + (lastError || '未知错误');
+}
+
+function goBack(){
+  if (window.history.length > 1) {
+    window.history.back();
+    return;
+  }
+  window.location.href = 'api-tester.html';
+}
+document.getElementById('refreshTaskRecordsBtn').addEventListener('click', loadTaskRecords);
+
+document.getElementById('taskRecordTbody').addEventListener('click', async (event) => {
+  const btn = event.target && event.target.closest ? event.target.closest('[data-action="cancel-task"]') : null;
+  if (!btn) return;
+
+  const taskCode = String(btn.getAttribute('data-task-code') || '').trim();
+  if (!taskCode) return;
+  if (!window.confirm('确认取消任务: ' + taskCode + ' ?')) {
+    return;
+  }
+
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '取消中...';
+  const metaEl = document.getElementById('taskRecordMeta');
   try {
-    await navigator.clipboard.writeText(document.getElementById('rawResp').textContent || '');
-    setMeta('已复制返回内容', 'ok');
+    const result = await cancelTaskByCode(taskCode);
+    const code = String(result?.code == null ? '' : result.code);
+    if (code === '0') {
+      metaEl.textContent = '任务 ' + taskCode + ' 已发送取消';
+      await loadTaskRecords();
+      return;
+    }
+    const msg = String(result?.message || '取消失败');
+    metaEl.textContent = '取消失败: ' + msg;
   } catch (e) {
-    setMeta('复制失败，请手动复制', 'err');
+    metaEl.textContent = '取消失败: ' + String(e && e.message ? e.message : e);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
   }
 });
 
 (async () => {
   await loadAddressConfig();
-  const queryTarget = qs.get('targetIp') || '';
-  document.getElementById('targetIp').value = queryTarget || defaultTargetIp;
+  await loadTaskRecords();
 })();
+
+setInterval(loadTaskRecords, 30000);
 </script>
 </body>
 </html>
