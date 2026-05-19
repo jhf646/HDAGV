@@ -257,6 +257,10 @@
     .primary-btn {
       background: #177ddc;
     }
+    .primary-btn:disabled {
+      background: #9aa5b1;
+      cursor: not-allowed;
+    }
     .secondary-btn {
       background: #5a6a7a;
     }
@@ -483,13 +487,48 @@
     const respStatusPillEl = document.getElementById('respStatusPill');
     const respTimePillEl = document.getElementById('respTimePill');
     const logStatusPillEl = document.getElementById('logStatusPill');
+    const sendBtnEl = document.getElementById('send');
     const taskSuccessValueEl = document.getElementById('taskSuccessValue');
     const taskAgvValueEl = document.getElementById('taskAgvValue');
     const taskMapValueEl = document.getElementById('taskMapValue');
     const taskLogValueEl = document.getElementById('taskLogValue');
     const taskCallTimeValueEl = document.getElementById('taskCallTimeValue');
     const LOG_QUEUE_KEY = 'agv_task_log_queue_v1';
+    const sendBtnDefaultText = (sendBtnEl && sendBtnEl.textContent) ? sendBtnEl.textContent : '发送';
+    let sendCooldownTimerId = null;
+    let sendCooldownLeft = 0;
     document.getElementById('ip').value = defaultTargetIp;
+
+    function startSendCooldown(seconds) {
+      if (!sendBtnEl) {
+        return;
+      }
+      if (sendCooldownTimerId) {
+        clearInterval(sendCooldownTimerId);
+        sendCooldownTimerId = null;
+      }
+
+      sendCooldownLeft = Math.max(0, Number(seconds) || 0);
+      if (sendCooldownLeft <= 0) {
+        sendBtnEl.disabled = false;
+        sendBtnEl.textContent = sendBtnDefaultText;
+        return;
+      }
+
+      sendBtnEl.disabled = true;
+      sendBtnEl.textContent = sendBtnDefaultText + '（' + sendCooldownLeft + 's）';
+      sendCooldownTimerId = setInterval(() => {
+        sendCooldownLeft -= 1;
+        if (sendCooldownLeft <= 0) {
+          clearInterval(sendCooldownTimerId);
+          sendCooldownTimerId = null;
+          sendBtnEl.disabled = false;
+          sendBtnEl.textContent = sendBtnDefaultText;
+          return;
+        }
+        sendBtnEl.textContent = sendBtnDefaultText + '（' + sendCooldownLeft + 's）';
+      }, 1000);
+    }
 
     function formatDateTime(ts) {
       const d = ts instanceof Date ? ts : new Date(ts);
@@ -921,6 +960,10 @@
       return fromPayload || 'AA';
     }
 
+    function canSendTaskWithoutAgv(payload) {
+      return String(payload?.taskTyp || '').trim() === 'A12';
+    }
+
     async function fetchAgvStatusByMap(targetBase, mapShortName) {
       const normalizedTargetBase = normalizeBaseUrl(targetBase);
       if (!normalizedTargetBase) {
@@ -1259,7 +1302,11 @@
       }
     });
 
-    document.getElementById('send').addEventListener('click', async () => {
+    sendBtnEl.addEventListener('click', async () => {
+      if (sendCooldownLeft > 0) {
+        return;
+      }
+      startSendCooldown(10);
       updateJsonBody();
 
       const ip = document.getElementById('ip').value.trim();
@@ -1291,6 +1338,7 @@
       }
 
       let selectedAgvInfo = null;
+      let taskDispatchNote = '';
       const callAtText = formatDateTime(new Date());
       setTaskExecutionMeta({
         successText: endpoint.id === 'genAgvSchedulingTask' ? '准备中' : '非任务接口',
@@ -1323,31 +1371,42 @@
           const queryResult = await fetchAgvStatusByMap(base, mapShortName);
           const selected = pickAgvFromStatusRows(queryResult.rows);
           if (!selected) {
-            responseEl.textContent =
-              '发送前检查失败: 当前地图 ' + mapShortName + ' 没有状态为 246 的可用AGV';
-            setResponseMeta('状态: 未发送', null, '日志: 未记录', 'err');
+            if (canSendTaskWithoutAgv(payload)) {
+              payload.agvCode = '';
+              taskDispatchNote =
+                '[AGV分配] 地图=' + mapShortName +
+                ' 当前无状态为 246/4 的可用AGV，跨楼层任务按空AGV编号发送';
+              setTaskExecutionMeta({
+                agvCode: '',
+                mapText: mapShortName,
+              });
+            } else {
+              responseEl.textContent =
+                '发送前检查失败: 当前地图 ' + mapShortName + ' 没有状态为 246 的可用AGV';
+              setResponseMeta('状态: 未发送', null, '日志: 未记录', 'err');
+              setTaskExecutionMeta({
+                successText: '失败',
+                successKind: 'err',
+                mapText: mapShortName,
+                logText: '未记录',
+                logKind: 'err',
+              });
+              return;
+            }
+          } else {
+            payload.agvCode = String(selected.robotCode || '');
+            selectedAgvInfo = {
+              robotCode: String(selected.robotCode || ''),
+              status: String(selected.status || ''),
+              battery: String(selected.battery || ''),
+              mapShortName,
+              via: queryResult.via,
+            };
             setTaskExecutionMeta({
-              successText: '失败',
-              successKind: 'err',
-              mapText: mapShortName,
-              logText: '未记录',
-              logKind: 'err',
+              agvCode: selectedAgvInfo.robotCode,
+              mapText: selectedAgvInfo.mapShortName,
             });
-            return;
           }
-
-          payload.agvCode = String(selected.robotCode || '');
-          selectedAgvInfo = {
-            robotCode: String(selected.robotCode || ''),
-            status: String(selected.status || ''),
-            battery: String(selected.battery || ''),
-            mapShortName,
-            via: queryResult.via,
-          };
-          setTaskExecutionMeta({
-            agvCode: selectedAgvInfo.robotCode,
-            mapText: selectedAgvInfo.mapShortName,
-          });
         } catch (err) {
           responseEl.textContent = '发送前检查失败: ' + String(err && err.message ? err.message : err);
           setResponseMeta('状态: 未发送', null, '日志: 未记录', 'err');
@@ -1378,6 +1437,8 @@
           ' 状态=' + selectedAgvInfo.status +
           ' 电量=' + selectedAgvInfo.battery +
           ' 查询通道=' + selectedAgvInfo.via;
+      } else if (taskDispatchNote) {
+        responseEl.textContent += '\n' + taskDispatchNote;
       }
       setResponseMeta('状态: 请求中', null, '日志: 待记录', 'idle');
       if (endpoint.id === 'genAgvSchedulingTask') {

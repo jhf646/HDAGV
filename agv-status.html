@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>AGV任务状态</title>
 <script src="./position-code-config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:"Microsoft YaHei",sans-serif;background:#f0f2f5;color:#333;font-size:14px}
@@ -26,6 +27,15 @@ label{display:block;font-size:12px;color:#666;margin-bottom:6px}
 .action-btn{height:26px;border:1px solid #d4380d;background:#d4380d;color:#fff;border-radius:6px;padding:0 8px;font-size:12px;cursor:pointer}
 .action-btn[disabled]{opacity:.65;cursor:not-allowed}
 .action-text{font-size:12px;color:#237804;font-weight:600}
+.filter-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px;background:#f9f9f9;border-radius:6px;margin-bottom:8px}
+.filter-row label{margin:0;font-size:12px;color:#666;min-width:40px}
+.filter-row input[type="date"]{height:28px;padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:12px}
+.filter-row .filter-btn{height:28px;border:1px solid #177ddc;background:#177ddc;color:#fff;border-radius:6px;padding:0 12px;font-size:12px;cursor:pointer}
+.filter-row .filter-btn:hover{background:#0c5aa6}
+.filter-row .export-btn{height:28px;border:1px solid #52c41a;background:#52c41a;color:#fff;border-radius:6px;padding:0 12px;font-size:12px;cursor:pointer}
+.filter-row .export-btn:hover{background:#389e0d}
+.filter-row .reset-btn{height:28px;border:1px solid #999;background:#fff;color:#666;border-radius:6px;padding:0 12px;font-size:12px;cursor:pointer}
+.filter-row .reset-btn:hover{background:#f5f5f5}
 .table-box{overflow:auto}
 table{width:100%;border-collapse:collapse;font-size:12px}
 th,td{padding:8px;border-bottom:1px solid #eee;text-align:left;white-space:nowrap}
@@ -46,6 +56,15 @@ th{background:#f5f5f5;color:#555;font-weight:600}
         <span id="taskRecordMeta" class="task-meta">未加载</span>
         <button id="refreshTaskRecordsBtn" class="mini-btn" type="button">刷新任务记录</button>
       </div>
+    </div>
+    <div class="filter-row">
+      <label>开始日期</label>
+      <input type="date" id="startDateInput"/>
+      <label style="margin-left:12px">结束日期</label>
+      <input type="date" id="endDateInput"/>
+      <button class="filter-btn" id="filterBtn" type="button">筛选</button>
+      <button class="reset-btn" id="resetFilterBtn" type="button">重置</button>
+      <button class="export-btn" id="exportExcelBtn" type="button">📥 导出Excel</button>
     </div>
     <table>
       <thead>
@@ -74,6 +93,9 @@ const addressConfig = { backend: {} };
 const defaultTargetIp = String(appConfig.defaultTargetIp || '192.168.111.70:8182');
 const TASK_STATUS_ENDPOINT = '/rcms/services/rest/hikRpcService/queryTaskStatus';
 const CANCEL_TASK_ENDPOINT = '/rcms/services/rest/hikRpcService/cancelTask';
+let allTaskRecords = [];
+let filteredTaskRecords = [];
+let taskStatusMapCache = {};
 
 function normalizeBaseUrl(urlText) {
   const val = String(urlText || '').trim();
@@ -296,6 +318,105 @@ function getStatusBadgeHtml(rawStatus) {
   return '<span class="' + cls + '">' + escapeHtml(label) + '</span>';
 }
 
+function parseDateTime(dateStr) {
+  if (!dateStr) return null;
+  return new Date(dateStr);
+}
+
+function isDateInRange(dateStr, startDate, endDate) {
+  if (!dateStr) return false;
+  const dt = parseDateTime(dateStr);
+  if (!dt) return false;
+  if (startDate && dt < startDate) return false;
+  if (endDate) {
+    const nextDay = new Date(endDate);
+    nextDay.setDate(nextDay.getDate() + 1);
+    if (dt >= nextDay) return false;
+  }
+  return true;
+}
+
+function applyDateFilter() {
+  const startInput = document.getElementById('startDateInput').value;
+  const endInput = document.getElementById('endDateInput').value;
+  const startDate = startInput ? new Date(startInput) : null;
+  const endDate = endInput ? new Date(endInput) : null;
+  
+  if (!startDate && !endDate) {
+    filteredTaskRecords = Array.from(allTaskRecords);
+  } else {
+    filteredTaskRecords = allTaskRecords.filter(r => {
+      return isDateInRange(String(r.created_at || ''), startDate, endDate);
+    });
+  }
+  
+  renderTaskRecordRows(filteredTaskRecords, taskStatusMapCache);
+}
+
+function resetDateFilter() {
+  document.getElementById('startDateInput').value = '';
+  document.getElementById('endDateInput').value = '';
+  filteredTaskRecords = Array.from(allTaskRecords);
+  renderTaskRecordRows(filteredTaskRecords, taskStatusMapCache);
+}
+
+function exportToExcel() {
+  const rows = filteredTaskRecords.length > 0 ? filteredTaskRecords : allTaskRecords;
+  if (rows.length === 0) {
+    alert('暂无数据可导出');
+    return;
+  }
+  
+  try {
+    if (typeof XLSX === 'undefined') {
+      alert('Excel导出库加载中，请稍候后重试');
+      return;
+    }
+    
+    const data = [];
+    data.push(['时间', '任务编号', '发货点', '收货点']);
+    
+    rows.forEach(r => {
+      let first = '-';
+      let second = '-';
+      try {
+        const arr = JSON.parse(r.position_codes || '[]');
+        const p1 = arr[0]?.positionCode || arr[0] || '';
+        const p2 = arr[1]?.positionCode || arr[1] || '';
+        first = toPositionName(p1);
+        second = toPositionName(p2);
+      } catch (e) {
+        first = '-';
+        second = '-';
+      }
+      
+      data.push([
+        String(r.created_at || '-'),
+        String(r.task_typ || '-'),
+        first,
+        second
+      ]);
+    });
+    
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    ws['!cols'] = [
+      {wch: 20},
+      {wch: 15},
+      {wch: 15},
+      {wch: 15}
+    ];
+    
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '任务记录');
+    
+    const timestamp = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14);
+    XLSX.writeFile(wb, 'AGV_Task_Records_' + timestamp + '.xlsx');
+  } catch (err) {
+    console.error('导出Excel错误:', err);
+    alert('导出失败: ' + String(err.message || err));
+  }
+}
+
 function renderTaskRecordRows(rows, taskStatusMap) {
   const tbody = document.getElementById('taskRecordTbody');
   const statusMap = taskStatusMap || {};
@@ -349,6 +470,8 @@ async function loadTaskRecords() {
       }
       const payload = await resp.json();
       const rows = Array.isArray(payload?.recent) ? payload.recent : [];
+      allTaskRecords = Array.from(rows);
+      filteredTaskRecords = Array.from(rows);
       const taskCodes = rows.map(item => extractTaskCodeFromResp(item?.resp_body || '')).filter(Boolean);
       let statusMap = {};
       try {
@@ -356,6 +479,7 @@ async function loadTaskRecords() {
       } catch (e) {
         // 状态查询失败不阻断记录展示
       }
+      taskStatusMapCache = statusMap;
       renderTaskRecordRows(rows, statusMap);
       metaEl.textContent = '已更新: ' + new Date().toLocaleTimeString('zh-CN') + ' | ' + rows.length + ' 条 | 状态同步 ' + Object.keys(statusMap).length + ' 条';
       return;
@@ -376,6 +500,9 @@ function goBack(){
   window.location.href = 'api-tester.html';
 }
 document.getElementById('refreshTaskRecordsBtn').addEventListener('click', loadTaskRecords);
+document.getElementById('filterBtn').addEventListener('click', applyDateFilter);
+document.getElementById('resetFilterBtn').addEventListener('click', resetDateFilter);
+document.getElementById('exportExcelBtn').addEventListener('click', exportToExcel);
 
 document.getElementById('taskRecordTbody').addEventListener('click', async (event) => {
   const btn = event.target && event.target.closest ? event.target.closest('[data-action="cancel-task"]') : null;
