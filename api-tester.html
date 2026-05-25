@@ -418,6 +418,10 @@
               <span id="taskSuccessValue" class="task-meta-value">未执行</span>
             </div>
             <div class="task-meta-item">
+              <span class="task-meta-label">任务类型判定</span>
+              <span id="taskFloorTypeValue" class="task-meta-value">-</span>
+            </div>
+            <div class="task-meta-item">
               <span class="task-meta-label">调用AGV编号</span>
               <span id="taskAgvValue" class="task-meta-value">-</span>
             </div>
@@ -489,6 +493,7 @@
     const logStatusPillEl = document.getElementById('logStatusPill');
     const sendBtnEl = document.getElementById('send');
     const taskSuccessValueEl = document.getElementById('taskSuccessValue');
+    const taskFloorTypeValueEl = document.getElementById('taskFloorTypeValue');
     const taskAgvValueEl = document.getElementById('taskAgvValue');
     const taskMapValueEl = document.getElementById('taskMapValue');
     const taskLogValueEl = document.getElementById('taskLogValue');
@@ -630,9 +635,11 @@
         }
         document.getElementById('body').value = JSON.stringify(sampleData, null, 2);
         renderJsonFields(sampleData);
+        updateJsonBody();
       } catch (err) {
         document.getElementById('body').value = '{}';
         renderJsonFields({});
+        updateJsonBody();
       }
     }
 
@@ -846,6 +853,21 @@
         obj[key] = hiddenFieldValues[key];
       });
 
+      if (endpointId === 'genAgvSchedulingTask') {
+        const decided = applyAutoTaskTypeByMap(obj);
+        const taskTypSelectEl = document.querySelector('.json-field-row .json-value[data-key="taskTyp"]');
+        if (taskTypSelectEl && decided.taskTyp) {
+          taskTypSelectEl.value = decided.taskTyp;
+        }
+        setTaskExecutionMeta({
+          floorTypeText: decided.floorTypeText || '-',
+        });
+      } else {
+        setTaskExecutionMeta({
+          floorTypeText: '-',
+        });
+      }
+
       document.getElementById('body').value = JSON.stringify(obj, null, 2);
     }
 
@@ -869,7 +891,7 @@
       }
     }
 
-    function setTaskExecutionMeta({ successText, successKind, agvCode, mapText, logText, logKind, callTimeText }) {
+    function setTaskExecutionMeta({ successText, successKind, floorTypeText, agvCode, mapText, logText, logKind, callTimeText }) {
       if (successText !== undefined) {
         taskSuccessValueEl.textContent = successText || '-';
         taskSuccessValueEl.className = 'task-meta-value';
@@ -878,6 +900,10 @@
         } else if (successKind === 'err') {
           taskSuccessValueEl.classList.add('err');
         }
+      }
+
+      if (floorTypeText !== undefined) {
+        taskFloorTypeValueEl.textContent = floorTypeText || '-';
       }
 
       if (agvCode !== undefined) {
@@ -907,6 +933,7 @@
       setTaskExecutionMeta({
         successText: '未执行',
         successKind: '',
+        floorTypeText: '-',
         agvCode: '-',
         mapText: '-',
         logText: '未记录',
@@ -946,6 +973,44 @@
       if (!Array.isArray(options)) return '';
       const matched = options.find(item => String(item?.value || '') === String(code || ''));
       return String(matched?.map || '').trim();
+    }
+
+    function resolveTaskTypeByMap(payload) {
+      const points = Array.isArray(payload?.positionCodePath) ? payload.positionCodePath : [];
+      const fromCode = String(points[0]?.positionCode || points[0] || '').trim();
+      const toCode = String(points[1]?.positionCode || points[1] || '').trim();
+      if (!fromCode || !toCode) {
+        return {
+          taskTyp: '',
+          floorTypeText: '待选择起点/终点',
+        };
+      }
+
+      const fromMap = getPositionMapByCode(fromCode);
+      const toMap = getPositionMapByCode(toCode);
+      if (!fromMap || !toMap) {
+        return {
+          taskTyp: '',
+          floorTypeText: '地图未配置',
+        };
+      }
+
+      const isSameFloor = fromMap === toMap;
+      return {
+        taskTyp: isSameFloor ? 'A01' : 'A12',
+        floorTypeText: isSameFloor ? '同楼层任务' : '跨楼层任务',
+      };
+    }
+
+    function applyAutoTaskTypeByMap(payload) {
+      if (!payload || typeof payload !== 'object') {
+        return { taskTyp: '', floorTypeText: '-' };
+      }
+      const decided = resolveTaskTypeByMap(payload);
+      if (decided.taskTyp) {
+        payload.taskTyp = decided.taskTyp;
+      }
+      return decided;
     }
 
     function resolveTaskMapShortName(payload) {
@@ -1322,6 +1387,7 @@
       const endpoint = endpoints[currentEndpointIndex];
       updateJsonBody();
       const payload = JSON.parse(document.getElementById('body').value || '{}');
+      const taskTypeDecision = endpoint.id === 'genAgvSchedulingTask' ? applyAutoTaskTypeByMap(payload) : null;
       const endpointRule = getFieldRules(endpoint.id);
       const shouldUseTimestampReqCode =
         Object.prototype.hasOwnProperty.call(payload, 'reqCode') ||
@@ -1343,6 +1409,7 @@
       setTaskExecutionMeta({
         successText: endpoint.id === 'genAgvSchedulingTask' ? '准备中' : '非任务接口',
         successKind: '',
+        floorTypeText: taskTypeDecision?.floorTypeText || '-',
         callTimeText: callAtText,
         logText: endpoint.id === 'genAgvSchedulingTask' ? '待记录' : '不记录',
         logKind: '',
