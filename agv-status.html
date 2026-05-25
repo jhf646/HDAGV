@@ -212,15 +212,43 @@ function extractTaskCodeFromResp(respBody) {
   return match && match[1] ? String(match[1]).trim() : '';
 }
 
+function extractAgvCodeFromRawBody(rawBody) {
+  const raw = String(rawBody || '').trim();
+  if (!raw) return '';
+  try {
+    const parsed = JSON.parse(raw);
+    const agvCode = String(parsed?.agvCode || '').trim();
+    if (agvCode) return agvCode;
+  } catch (e) {
+    // 非JSON时继续用正则尝试
+  }
+  const match = raw.match(/"agvCode"\s*:\s*"([^"]+)"/);
+  return match && match[1] ? String(match[1]).trim() : '';
+}
+
 function normalizeTaskStatusLabel(rawStatus) {
   const val = String(rawStatus == null ? '' : rawStatus).trim();
   if (!val) return '未知';
+  const map = {
+    '1': '已创建',
+    '2': '正在执行',
+    '5': '取消完成',
+    '9': '已结束'
+  };
+  if (map[val]) {
+    return map[val];
+  }
   return val;
 }
 
 function isTaskDone(rawStatus) {
   const val = String(rawStatus == null ? '' : rawStatus).trim().toLowerCase();
   return val === '9' || val === 'done' || val === 'finish' || val === 'finished' || val === 'end' || val.includes('完成');
+}
+
+function isTaskTerminalStatus(rawStatus) {
+  const val = String(rawStatus == null ? '' : rawStatus).trim();
+  return val === '5' || val === '9';
 }
 
 async function callProxyJson(targetUrl, body) {
@@ -255,37 +283,66 @@ async function callProxyJson(targetUrl, body) {
   throw new Error(lastError || '代理调用失败');
 }
 
-async function batchQueryTaskStatus(taskCodes) {
-  const uniq = Array.from(new Set((taskCodes || []).map(v => String(v || '').trim()).filter(Boolean)));
-  if (uniq.length === 0) {
+async function batchQueryTaskStatus(taskRecords) {
+  const records = Array.isArray(taskRecords) ? taskRecords : [];
+  const agvCodes = Array.from(new Set(records.map(item => String(item?.agvCode || '').trim()).filter(Boolean)));
+  const expectedTaskCodes = Array.from(new Set(records.map(item => String(item?.taskCode || '').trim()).filter(Boolean)));
+  if (agvCodes.length === 0 && expectedTaskCodes.length === 0) {
     return {};
   }
   const targetBase = getTargetRcsBaseUrl();
   if (!targetBase) {
     return {};
   }
-
-  const payload = {
-    reqCode: String(Date.now()),
-    reqTime: '',
-    clientCode: '',
-    tokenCode: '',
-    agvCode: '',
-    taskCodes: uniq
-  };
-  const data = await callProxyJson(targetBase + TASK_STATUS_ENDPOINT, payload);
-  const rows = Array.isArray(data?.data) ? data.data : [];
   const map = {};
-  rows.forEach(item => {
-    const code = String(item?.taskCode || '').trim();
-    if (code) {
-      map[code] = item;
+
+  for (const agvCode of agvCodes) {
+    const payload = {
+      reqCode: String(Date.now()),
+      reqTime: '',
+      clientCode: '',
+      tokenCode: '',
+      agvCode,
+      taskCodes: ['']
+    };
+    try {
+      const data = await callProxyJson(targetBase + TASK_STATUS_ENDPOINT, payload);
+      const rows = Array.isArray(data?.data) ? data.data : [];
+      rows.forEach(item => {
+        const code = String(item?.taskCode || '').trim();
+        if (code) {
+          map[code] = item;
+        }
+      });
+    } catch (e) {
+      // 单个AGV查询失败时，后续再按任务号兜底
     }
-  });
+  }
+
+  const fallbackTaskCodes = expectedTaskCodes.filter(code => !map[code]);
+  if (fallbackTaskCodes.length > 0) {
+    const payload = {
+      reqCode: String(Date.now()),
+      reqTime: '',
+      clientCode: '',
+      tokenCode: '',
+      agvCode: '',
+      taskCodes: fallbackTaskCodes
+    };
+    const data = await callProxyJson(targetBase + TASK_STATUS_ENDPOINT, payload);
+    const rows = Array.isArray(data?.data) ? data.data : [];
+    rows.forEach(item => {
+      const code = String(item?.taskCode || '').trim();
+      if (code && !map[code]) {
+        map[code] = item;
+      }
+    });
+  }
+
   return map;
 }
 
-async function cancelTaskByCode(taskCode) {
+async function cancelTaskByAgvCode(agvCode) {
   const targetBase = getTargetRcsBaseUrl();
   if (!targetBase) {
     throw new Error('缺少RCS地址');
@@ -295,21 +352,21 @@ async function cancelTaskByCode(taskCode) {
     reqTime: '',
     clientCode: '',
     tokenCode: '',
-    forceCancel: '1',
-    taskCode: String(taskCode || '').trim()
+    forceCancel: '',
+    agvCode: String(agvCode || '').trim()
   };
   return await callProxyJson(targetBase + CANCEL_TASK_ENDPOINT, payload);
 }
 
-function getActionCellHtml(taskCode, rawStatus) {
-  if (!taskCode) {
-    return '<span style="color:#999">无任务单号</span>';
+function getActionCellHtml(agvCode, rawStatus) {
+  if (!agvCode) {
+    return '<span style="color:#999">无AGV编号</span>';
   }
-  if (isTaskDone(rawStatus)) {
-    return '<span class="action-text">已完成</span>';
+  if (isTaskTerminalStatus(rawStatus)) {
+    return '<span class="action-text"></span>';
   }
-  const safeCode = escapeHtml(taskCode);
-  return '<button class="action-btn" data-action="cancel-task" data-task-code="' + safeCode + '">取消任务</button>';
+  const safeCode = escapeHtml(agvCode);
+  return '<button class="action-btn" data-action="cancel-task" data-agv-code="' + safeCode + '">取消任务</button>';
 }
 
 function getStatusBadgeHtml(rawStatus) {
@@ -440,8 +497,11 @@ function renderTaskRecordRows(rows, taskStatusMap) {
     }
     const status = Number(r.resp_status) === 200 ? '成功' : '失败';
     const respText = String(r.resp_body || '').slice(0, 120);
+    const requestAgvCode = extractAgvCodeFromRawBody(r.raw_body || '');
     const taskCode = extractTaskCodeFromResp(r.resp_body || '');
-    const taskStateRaw = taskCode && statusMap[taskCode] ? statusMap[taskCode].taskStatus : '';
+    const taskInfo = taskCode && statusMap[taskCode] ? statusMap[taskCode] : null;
+    const taskStateRaw = taskInfo ? taskInfo.taskStatus : '';
+    const agvCode = String(taskInfo?.agvCode || requestAgvCode || '').trim();
     return '<tr>' +
       '<td>' + escapeHtml(String(r.created_at || '-')) + '</td>' +
       '<td>' + escapeHtml(String(r.task_typ || '-')) + '</td>' +
@@ -450,7 +510,7 @@ function renderTaskRecordRows(rows, taskStatusMap) {
       '<td>' + escapeHtml(status + ' (' + String(r.resp_status || '-') + ')') + '</td>' +
       '<td>' + escapeHtml(respText) + '</td>' +
       '<td>' + getStatusBadgeHtml(taskStateRaw) + '</td>' +
-      '<td>' + getActionCellHtml(taskCode, taskStateRaw) + '</td>' +
+      '<td>' + getActionCellHtml(agvCode, taskStateRaw) + '</td>' +
     '</tr>';
   }).join('');
 }
@@ -472,10 +532,13 @@ async function loadTaskRecords() {
       const rows = Array.isArray(payload?.recent) ? payload.recent : [];
       allTaskRecords = Array.from(rows);
       filteredTaskRecords = Array.from(rows);
-      const taskCodes = rows.map(item => extractTaskCodeFromResp(item?.resp_body || '')).filter(Boolean);
+      const taskRecords = rows.map(item => ({
+        taskCode: extractTaskCodeFromResp(item?.resp_body || ''),
+        agvCode: extractAgvCodeFromRawBody(item?.raw_body || '')
+      })).filter(item => item.taskCode || item.agvCode);
       let statusMap = {};
       try {
-        statusMap = await batchQueryTaskStatus(taskCodes);
+        statusMap = await batchQueryTaskStatus(taskRecords);
       } catch (e) {
         // 状态查询失败不阻断记录展示
       }
@@ -508,9 +571,9 @@ document.getElementById('taskRecordTbody').addEventListener('click', async (even
   const btn = event.target && event.target.closest ? event.target.closest('[data-action="cancel-task"]') : null;
   if (!btn) return;
 
-  const taskCode = String(btn.getAttribute('data-task-code') || '').trim();
-  if (!taskCode) return;
-  if (!window.confirm('确认取消任务: ' + taskCode + ' ?')) {
+  const agvCode = String(btn.getAttribute('data-agv-code') || '').trim();
+  if (!agvCode) return;
+  if (!window.confirm('确认取消AGV任务，AGV编号: ' + agvCode + ' ?')) {
     return;
   }
 
@@ -519,10 +582,10 @@ document.getElementById('taskRecordTbody').addEventListener('click', async (even
   btn.textContent = '取消中...';
   const metaEl = document.getElementById('taskRecordMeta');
   try {
-    const result = await cancelTaskByCode(taskCode);
+    const result = await cancelTaskByAgvCode(agvCode);
     const code = String(result?.code == null ? '' : result.code);
     if (code === '0') {
-      metaEl.textContent = '任务 ' + taskCode + ' 已发送取消';
+      metaEl.textContent = 'AGV ' + agvCode + ' 已发送取消';
       await loadTaskRecords();
       return;
     }
