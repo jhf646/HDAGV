@@ -391,6 +391,7 @@
         <button id="backBtn" class="back-btn" type="button">返回</button>
         <button id="statsBtn" class="stats-btn" type="button">📊 统计</button>
         <button id="agvStatusBtn" class="stats-btn" type="button">🤖 AGV任务状态</button>
+        <button id="positionCodeBtn" class="stats-btn" type="button">📍 点位配置</button>
         <div id="detailTitle" class="detail-title">接口详情</div>
       </div>
       <div class="detail-body">
@@ -481,6 +482,7 @@
     const defaultTargetIp = String(appConfig.defaultTargetIp || '192.168.111.70:8182');
     const iconPool = ['📦', '🚚', '✅', '📭', '🧭', '⚙️', '📣', '🔔', '🏗️', '🔎', '🤖', '🚨', '🧱', '🪶', '🧷', '🧪', '📬', '⛔'];
     const fieldConfig = appConfig.fieldConfig || {};
+    let dbPositionCodeOptions = [];
     let currentEndpointIndex = -1;
     let hiddenFieldValues = {};
 
@@ -550,6 +552,19 @@
     }
 
     function getPositionCodeOptions(endpointId, arrayKey, fieldKey){
+      if (
+        endpointId === 'genAgvSchedulingTask' &&
+        arrayKey === 'positionCodePath' &&
+        fieldKey === 'positionCode' &&
+        Array.isArray(dbPositionCodeOptions) &&
+        dbPositionCodeOptions.length > 0
+      ) {
+        return dbPositionCodeOptions.map(item => ({
+          label: String(item.label ?? item.value ?? ''),
+          value: String(item.value ?? item.label ?? '')
+        }));
+      }
+
       const configured = fieldConfig?.[endpointId]?.[arrayKey]?.[fieldKey];
       if (Array.isArray(configured) && configured.length > 0) {
         return configured.map(item => ({
@@ -608,6 +623,55 @@
         card.addEventListener('click', () => openEndpoint(index));
         interfaceList.appendChild(card);
       });
+
+      const configCard = document.createElement('button');
+      configCard.type = 'button';
+      configCard.className = 'interface-card';
+      configCard.innerHTML = `
+        <div class="card-icon">📍</div>
+        <div class="card-title">点位配置管理</div>
+      `;
+      configCard.addEventListener('click', () => {
+        const base = getConfiguredBackendBaseUrl() || window.location.origin || 'http://localhost:3000';
+        window.open('position-code-admin.html?apiHost=' + encodeURIComponent(base), '_blank');
+      });
+      interfaceList.appendChild(configCard);
+    }
+
+    async function loadPositionCodeOptionsFromDb() {
+      const bases = [];
+      const cfg = getConfiguredBackendBaseUrl();
+      if (cfg) bases.push(cfg);
+      if (window.location && window.location.origin) bases.push(window.location.origin);
+      const host = String(window.location.hostname || '').trim();
+      if (host) bases.push('http://' + host + ':3000');
+      bases.push('http://127.0.0.1:3000');
+      bases.push('http://localhost:3000');
+
+      const uniq = Array.from(new Set(bases.filter(Boolean).map(v => String(v).replace(/\/$/, ''))));
+      for (const base of uniq) {
+        try {
+          const resp = await fetch(base + '/api/position-codes');
+          if (!resp.ok) continue;
+          const data = await resp.json();
+          if (!data || !data.ok || !Array.isArray(data.rows) || data.rows.length === 0) continue;
+          dbPositionCodeOptions = data.rows.map(item => ({
+            label: String(item.label || ''),
+            value: String(item.value || ''),
+            map: String(item.map || ''),
+          })).filter(item => item.label && item.value);
+
+          if (
+            fieldConfig?.genAgvSchedulingTask?.positionCodePath &&
+            Array.isArray(fieldConfig.genAgvSchedulingTask.positionCodePath.positionCode)
+          ) {
+            fieldConfig.genAgvSchedulingTask.positionCodePath.positionCode = dbPositionCodeOptions;
+          }
+          return;
+        } catch (e) {
+          // 尝试下一个候选地址
+        }
+      }
     }
 
     function openEndpoint(index){
@@ -1423,6 +1487,11 @@
       );
     });
 
+    document.getElementById('positionCodeBtn').addEventListener('click', () => {
+      const base = getConfiguredBackendBaseUrl() || window.location.origin || 'http://localhost:3000';
+      window.open('position-code-admin.html?apiHost=' + encodeURIComponent(base), '_blank');
+    });
+
     document.getElementById('pretty').addEventListener('click', () => {
       try {
         const j = JSON.parse(document.getElementById('body').value);
@@ -1731,6 +1800,7 @@
 
     (async () => {
       await loadAddressConfig();
+      await loadPositionCodeOptionsFromDb();
       flushQueuedTaskLogs().catch(() => {
         // 页面初始化时静默尝试
       });

@@ -6,6 +6,7 @@ const path = require("path");
 const fs = require("fs");
 
 const ADDRESS_CONFIG_PATH = path.join(__dirname, "request-address-config.json");
+const POSITION_CONFIG_PATH = path.join(__dirname, "position-code-config.js");
 
 function loadAddressConfig() {
   try {
@@ -26,10 +27,10 @@ const addressConfig = loadAddressConfig();
 const DB_NAME = "AGV_PDA_LOG";
 const sqlConfig = {
   user: "sa",
-  // password: "123456",
-  // server: "DESKTOP-L654TSI",
- password: "Byt123",
- server: "192.168.111.70",
+  password: "123456",
+  server: "DESKTOP-L654TSI",
+//  password: "Byt123",
+//  server: "192.168.111.70",
   database: "master", // 先连 master，建库后切换
   options: {
     encrypt: false,
@@ -41,6 +42,92 @@ const sqlConfig = {
 let pool = null;
 let dbInitError = "";
 let dbLastReadyAt = "";
+
+function parsePositionCodeItemsFromConfig() {
+  try {
+    if (!fs.existsSync(POSITION_CONFIG_PATH)) return [];
+    const text = fs.readFileSync(POSITION_CONFIG_PATH, "utf8");
+    const items = [];
+    const reg = /label\s*:\s*["']([^"']+)["']\s*,\s*value\s*:\s*["']([^"']+)["']\s*,\s*map\s*:\s*["']([^"']+)["']/g;
+    let m;
+    while ((m = reg.exec(text))) {
+      const label = String(m[1] || "").trim();
+      const value = String(m[2] || "").trim();
+      const map = String(m[3] || "").trim();
+      if (!label || !value) continue;
+      items.push({ label, value, map });
+    }
+    return items;
+  } catch (err) {
+    console.error("[POSITION_CODE] parse config error:", err.message);
+    return [];
+  }
+}
+
+async function syncPositionCodesToDb(dbPool) {
+  const rows = parsePositionCodeItemsFromConfig();
+  if (!rows.length) {
+    return { synced: 0 };
+  }
+
+  let synced = 0;
+  for (const row of rows) {
+    await dbPool
+      .request()
+      .input("point_code", sql.NVarChar(100), row.value)
+      .input("point_name", sql.NVarChar(200), row.label)
+      .input("point_map", sql.NVarChar(50), row.map || "")
+      .query(`
+        MERGE position_code AS t
+        USING (SELECT @point_code AS point_code, @point_name AS point_name, @point_map AS point_map) AS s
+        ON t.point_code = s.point_code
+        WHEN MATCHED AND (ISNULL(t.point_map, '') <> ISNULL(s.point_map, '')) THEN
+          UPDATE SET
+            t.point_map = s.point_map,
+            t.updated_at = GETDATE()
+        WHEN NOT MATCHED THEN
+          INSERT (point_code, point_name, point_map)
+          VALUES (s.point_code, s.point_name, s.point_map);
+      `);
+    synced += 1;
+  }
+  return { synced };
+}
+
+async function rebuildPositionCodesTable(dbPool) {
+  const rows = parsePositionCodeItemsFromConfig();
+  if (!rows.length) {
+    throw new Error("未解析到点位配置，已取消重建");
+  }
+
+  await dbPool.request().query(`
+    IF OBJECT_ID(N'position_code', N'U') IS NOT NULL
+      DROP TABLE position_code;
+
+    CREATE TABLE position_code (
+      id            INT IDENTITY(1,1) PRIMARY KEY,
+      point_name    NVARCHAR(200) NOT NULL,
+      point_code    NVARCHAR(100) NOT NULL UNIQUE,
+      point_map     NVARCHAR(50)  NOT NULL,
+      created_at    DATETIME DEFAULT GETDATE(),
+      updated_at    DATETIME DEFAULT GETDATE()
+    )
+  `);
+
+  for (const row of rows) {
+    await dbPool
+      .request()
+      .input("point_code", sql.NVarChar(100), row.value)
+      .input("point_name", sql.NVarChar(200), row.label)
+      .input("point_map", sql.NVarChar(50), row.map || "")
+      .query(`
+        INSERT INTO position_code (point_code, point_name, point_map)
+        VALUES (@point_code, @point_name, @point_map)
+      `);
+  }
+
+  return { rebuilt: rows.length };
+}
 
 async function getPool() {
   if (pool) return pool;
@@ -76,6 +163,24 @@ async function getPool() {
       created_at     DATETIME DEFAULT GETDATE()
     )
   `);
+
+  await pool.request().query(`
+    IF NOT EXISTS (
+      SELECT * FROM INFORMATION_SCHEMA.TABLES
+      WHERE TABLE_NAME = 'position_code'
+    )
+    CREATE TABLE position_code (
+      id            INT IDENTITY(1,1) PRIMARY KEY,
+      point_name    NVARCHAR(200) NOT NULL,
+      point_code    NVARCHAR(100) NOT NULL UNIQUE,
+      point_map     NVARCHAR(50)  NOT NULL,
+      created_at    DATETIME DEFAULT GETDATE(),
+      updated_at    DATETIME DEFAULT GETDATE()
+    )
+  `);
+
+  const syncResult = await syncPositionCodesToDb(pool);
+  console.log("[DB] position_code synced:", syncResult.synced);
 
   dbInitError = "";
   dbLastReadyAt = new Date().toISOString();
@@ -127,6 +232,70 @@ app.get("/api/health", async (req, res) => {
       },
       error: err.message,
     });
+  }
+});
+
+// ── 点位配置：查询（点位名称/点位编号/点位地图）────────────────────
+app.get("/api/position-codes", async (req, res) => {
+  try {
+    const p = await getPool();
+    const result = await p.request().query(`
+      SELECT point_name AS label, point_code AS value, point_map AS map,
+             CONVERT(NVARCHAR(19), updated_at, 120) AS updated_at
+      FROM position_code
+      ORDER BY TRY_CONVERT(INT, point_code), point_code
+    `);
+    res.json({ ok: true, rows: result.recordset || [] });
+  } catch (err) {
+    console.error("[DB] get position-codes error:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── 点位配置：仅允许修改点位名称(label) ────────────────────────────
+app.put("/api/position-codes/:value/label", async (req, res) => {
+  try {
+    const value = String(req.params.value || "").trim();
+    const label = String((req.body || {}).label || "").trim();
+    if (!value) {
+      return res.status(400).json({ ok: false, error: "点位编号不能为空" });
+    }
+    if (!label) {
+      return res.status(400).json({ ok: false, error: "点位名称不能为空" });
+    }
+
+    const p = await getPool();
+    const updateResult = await p
+      .request()
+      .input("point_code", sql.NVarChar(100), value)
+      .input("point_name", sql.NVarChar(200), label)
+      .query(`
+        UPDATE position_code
+        SET point_name = @point_name,
+            updated_at = GETDATE()
+        WHERE point_code = @point_code
+      `);
+
+    if (!updateResult.rowsAffected || !updateResult.rowsAffected[0]) {
+      return res.status(404).json({ ok: false, error: "点位编号不存在" });
+    }
+
+    res.json({ ok: true, value, label });
+  } catch (err) {
+    console.error("[DB] update position-code label error:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── 点位配置：前端一键重建（按最新配置重建表+重灌数据）──────────────
+app.post("/api/position-codes/rebuild", async (req, res) => {
+  try {
+    const p = await getPool();
+    const result = await rebuildPositionCodesTable(p);
+    res.json({ ok: true, rebuilt: result.rebuilt });
+  } catch (err) {
+    console.error("[DB] rebuild position-code table error:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
