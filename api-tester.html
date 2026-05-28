@@ -1029,6 +1029,29 @@
       return String(payload?.taskTyp || '').trim() === 'A12';
     }
 
+    async function fetchWithTimeout(url, options, timeoutMs) {
+      const controller = new AbortController();
+      const timeout = Math.max(300, Number(timeoutMs) || 2000);
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        controller.abort('timeout');
+      }, timeout);
+      try {
+        return await fetch(url, {
+          ...(options || {}),
+          signal: controller.signal,
+        });
+      } catch (e) {
+        if (timedOut || (e && e.name === 'AbortError')) {
+          throw new Error('请求超时(' + timeout + 'ms)');
+        }
+        throw e;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
     async function fetchAgvStatusByMap(targetBase, mapShortName) {
       const normalizedTargetBase = normalizeBaseUrl(targetBase);
       if (!normalizedTargetBase) {
@@ -1060,7 +1083,7 @@
       let lastError = '';
       for (const proxyUrl of unique) {
         try {
-          const resp = await fetch(proxyUrl, {
+          const resp = await fetchWithTimeout(proxyUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1069,7 +1092,7 @@
               headers: { 'Content-Type': 'application/json' },
               body
             })
-          });
+          }, 1800);
           const text = await resp.text();
           if (!resp.ok) {
             lastError = 'proxy ' + proxyUrl + ' HTTP ' + resp.status + ' ' + String(text || '').slice(0, 120);
@@ -1278,7 +1301,49 @@
       return Array.from(new Set(bases.map(v => String(v || '').replace(/\/$/, '')).filter(Boolean)));
     }
 
-    async function checkRecentSuccessfulTask(payload, seconds) {
+    async function checkStationOccupancy(payload) {
+      const { fromCode, toCode } = getTaskFromToCodes(payload);
+      if (!fromCode || !toCode) {
+        return { ok: true, occupied: false };
+      }
+
+      const reqBody = {
+        fromCode,
+        toCode,
+      };
+
+      const bases = getBackendApiBaseCandidates();
+      let lastErr = '';
+      for (const base of bases) {
+        const url = base + '/api/task-log/check-occupancy';
+        try {
+          const resp = await fetchWithTimeout(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(reqBody),
+          }, 3500);
+          const text = await resp.text();
+          if (!resp.ok) {
+            lastErr = 'occupancy ' + url + ' HTTP ' + resp.status;
+            continue;
+          }
+          return JSON.parse(text);
+        } catch (e) {
+          lastErr = 'occupancy ' + url + ' ' + String(e && e.message ? e.message : e);
+        }
+      }
+
+      // 检查失败时不放行，避免漏拦截
+      console.warn('[Occupancy Check] Failed:', lastErr);
+      return {
+        ok: false,
+        occupied: true,
+        message: '站点占用检查失败（超时或网络异常），为安全起见已拦截，请重试',
+        error: lastErr,
+      };
+    }
+
+    async function checkDuplicateTaskByPositionCodes(payload, seconds) {
       const { fromCode, toCode } = getTaskFromToCodes(payload);
       if (!fromCode || !toCode) {
         return { ok: true, exists: false };
@@ -1294,13 +1359,13 @@
       const bases = getBackendApiBaseCandidates();
       let lastErr = '';
       for (const base of bases) {
-        const url = base + '/api/task-log/recent-success';
+        const url = base + '/api/task-log/check-duplicate';
         try {
-          const resp = await fetch(url, {
+          const resp = await fetchWithTimeout(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(reqBody),
-          });
+          }, 4500);
           const text = await resp.text();
           if (!resp.ok) {
             lastErr = 'direct ' + url + ' HTTP ' + resp.status + ' ' + String(text || '').slice(0, 120);
@@ -1312,7 +1377,7 @@
         }
       }
 
-      throw new Error(lastErr || 'recent-success check failed');
+      throw new Error(lastErr || 'duplicate check failed');
     }
 
     async function flushQueuedTaskLogs(){
@@ -1371,7 +1436,7 @@
       if (sendCooldownLeft > 0) {
         return;
       }
-      startSendCooldown(10);
+      startSendCooldown(15);
       updateJsonBody();
 
       const ip = document.getElementById('ip').value.trim();
@@ -1416,19 +1481,58 @@
       });
       if (endpoint.id === 'genAgvSchedulingTask') {
         try {
-          const recent = await checkRecentSuccessfulTask(payload, 30);
-          if (recent?.exists) {
-            const createdAt = String(recent?.row?.created_at || '-');
+          // ────── 1. 并行检查：站点占用 + 路径重复 ──────
+          const [occupancyCheck, duplicate] = await Promise.all([
+            checkStationOccupancy(payload),
+            checkDuplicateTaskByPositionCodes(payload, 0),
+          ]);
+          if (occupancyCheck && occupancyCheck.ok === false) {
+            const msg = occupancyCheck?.message || '站点占用检查失败，已拦截';
             responseEl.textContent =
-              '该任务已生成（30秒内防重）\n' +
+              '该任务已拦截（占用检查失败）\n' +
+              '任务: ' + String(payload?.taskTyp || '-') +
+              ' | 路径: ' + String(getTaskFromToCodes(payload).fromCode || '-') + ' -> ' + String(getTaskFromToCodes(payload).toCode || '-') +
+              '\n' + msg +
+              '\n' + String(occupancyCheck?.error || '');
+            setResponseMeta('状态: 已拦截', null, '日志: 占用检查失败未放行', 'err');
+            setTaskExecutionMeta({
+              successText: '已拦截',
+              successKind: 'err',
+              logText: '占用检查失败未放行',
+              logKind: 'err',
+            });
+            return;
+          }
+          if (occupancyCheck?.occupied) {
+            const msg = occupancyCheck?.message || '站点被占用';
+            responseEl.textContent =
+              '该任务已拦截（站点被占用）\n' +
+              '任务: ' + String(payload?.taskTyp || '-') +
+              ' | 路径: ' + String(getTaskFromToCodes(payload).fromCode || '-') + ' -> ' + String(getTaskFromToCodes(payload).toCode || '-') +
+              '\n' + msg;
+            setResponseMeta('状态: 已拦截', null, '日志: ' + msg, 'err');
+            setTaskExecutionMeta({
+              successText: '已拦截',
+              successKind: 'err',
+              logText: msg,
+              logKind: 'err',
+            });
+            return;
+          }
+
+          // ────── 2. 再判定重复任务 ──────
+          if (duplicate?.exists) {
+            const createdAt = String(duplicate?.row?.created_at || '-');
+            responseEl.textContent =
+              '该任务已拦截（数据库 position_codes 判重）\n' +
               '任务: ' + String(payload?.taskTyp || '-') +
               ' | 路径: ' + String(getTaskFromToCodes(payload).fromCode || '-') + ' -> ' + String(getTaskFromToCodes(payload).toCode || '-') +
               '\ncreated_at: ' + createdAt;
-            setResponseMeta('状态: 已拦截重复', null, '日志: 已存在成功记录', 'err');
+            setResponseMeta('状态: 已拦截重复', null, '日志: position_codes 已存在', 'err');
             setTaskExecutionMeta({
               successText: '已生成',
               successKind: 'ok',
-              logText: '已存在成功记录',
+              logText: 'position_codes 已存在',
               logKind: 'ok',
             });
             return;

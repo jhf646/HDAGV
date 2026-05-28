@@ -8,36 +8,113 @@
 <script src="./position-code-config.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:"Microsoft YaHei",sans-serif;background:#f0f2f5;color:#333;font-size:14px}
-header{background:#1565c0;color:#fff;padding:12px 16px;display:flex;align-items:center;justify-content:space-between}
-header h1{font-size:18px;font-weight:700}
-header .back{background:rgba(255,255,255,.2);border:none;color:#fff;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px}
-.summary{display:flex;gap:10px;padding:12px;flex-wrap:wrap}
-.stat-card{flex:1;min-width:130px;background:#fff;border-radius:10px;padding:14px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.1)}
-.stat-card .num{font-size:28px;font-weight:700;color:#1565c0}
-.stat-card .lbl{font-size:12px;color:#888;margin-top:4px}
-.charts{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 12px 12px}
-@media(max-width:480px){.charts{grid-template-columns:1fr}}
-.chart-box{background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.1)}
-.chart-box h3{font-size:14px;color:#555;margin-bottom:8px}
+:root{
+  --bg:#eef3f8;
+  --bg-grad-1:#f6fbff;
+  --bg-grad-2:#edf2ff;
+  --text:#1f2a37;
+  --muted:#6c7788;
+  --card:#ffffff;
+  --card-soft:#f7fbff;
+  --header:#165db6;
+  --header-btn:rgba(255,255,255,.16);
+  --border:#dbe5f0;
+  --shadow:0 10px 24px rgba(15,55,110,.08);
+  --accent:#2b7fff;
+  --ok:#1f9d55;
+  --err:#d64545;
+  --grid:#d8e2ee;
+}
+body[data-theme="dark"]{
+  --bg:#0f141a;
+  --bg-grad-1:#171d25;
+  --bg-grad-2:#121821;
+  --text:#d9e3ef;
+  --muted:#94a3b8;
+  --card:#1a222d;
+  --card-soft:#1d2733;
+  --header:#101826;
+  --header-btn:rgba(148,163,184,.2);
+  --border:#2a3644;
+  --shadow:0 10px 28px rgba(0,0,0,.35);
+  --accent:#57a0ff;
+  --ok:#33c381;
+  --err:#ff6b6b;
+  --grid:#334253;
+}
+body{
+  font-family:"Microsoft YaHei",sans-serif;
+  background:radial-gradient(1200px 500px at 10% -20%,var(--bg-grad-2),transparent),linear-gradient(160deg,var(--bg-grad-1),var(--bg));
+  color:var(--text);
+  font-size:14px;
+  min-height:100vh;
+  height:100vh;
+  overflow:hidden;
+}
+header{background:var(--header);color:#fff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 6px 20px rgba(0,0,0,.16);position:sticky;top:0;z-index:10}
+header h1{font-size:18px;font-weight:700;letter-spacing:.3px;display:flex;align-items:center;gap:8px}
+.header-actions{display:flex;gap:8px;align-items:center}
+header .back,
+.theme-btn{background:var(--header-btn);border:1px solid rgba(255,255,255,.2);color:#fff;padding:6px 14px;border-radius:8px;cursor:pointer;font-size:13px;backdrop-filter:blur(2px)}
+.app-shell{height:calc(100vh - 54px);display:flex;flex-direction:column;gap:12px;padding:12px 14px 14px;overflow:hidden}
+.summary{display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:12px;padding:0}
+@media(max-width:920px){.summary{grid-template-columns:repeat(2,minmax(140px,1fr))}}
+@media(max-width:520px){.summary{grid-template-columns:1fr}}
+.stat-card{background:linear-gradient(170deg,var(--card),var(--card-soft));border:1px solid var(--border);border-radius:14px;padding:15px 14px;text-align:center;box-shadow:var(--shadow);min-height:82px;display:flex;flex-direction:column;justify-content:center}
+.stat-card .num{font-size:30px;font-weight:700;color:var(--accent);line-height:1}
+.stat-card .lbl{font-size:12px;color:var(--muted);margin-top:8px}
+.main-grid{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.6fr) minmax(320px,.95fr);gap:12px}
+@media(max-width:1100px){
+  .main-grid{grid-template-columns:1fr}
+}
+.panel-stack{display:flex;flex-direction:column;gap:12px;min-height:0}
+.hero-panel{background:linear-gradient(180deg,var(--card),var(--card-soft));border-radius:18px;padding:16px;border:1px solid var(--border);box-shadow:var(--shadow);min-height:0;display:flex;flex-direction:column}
+.hero-panel h3{font-size:15px;color:var(--text);margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.hero-panel .sub{font-size:12px;color:var(--muted);font-weight:400}
+.chart-box{background:linear-gradient(180deg,var(--card),var(--card-soft));border-radius:14px;padding:14px;border:1px solid var(--border);box-shadow:var(--shadow);min-height:0;display:flex;flex-direction:column}
+.chart-box h3{font-size:14px;color:var(--text);margin-bottom:10px}
 .chart-box canvas{width:100%!important}
-.table-box{background:#fff;border-radius:10px;padding:12px;margin:0 12px 16px;box-shadow:0 1px 4px rgba(0,0,0,.1);overflow-x:auto}
-.table-box h3{font-size:14px;color:#555;margin-bottom:8px}
-table{width:100%;border-collapse:collapse;font-size:12px}
-th,td{padding:6px 8px;border-bottom:1px solid #eee;text-align:left;white-space:nowrap}
-th{background:#f5f5f5;font-weight:600;color:#555}
-tr:hover td{background:#f9f9f9}
-.resp-ok{color:#2e7d32;font-weight:600}
-.resp-err{color:#c62828;font-weight:600}
-.footer{text-align:center;padding:8px;font-size:11px;color:#bbb}
-.refresh-bar{text-align:right;padding:4px 14px;font-size:12px;color:#888}
+.chart-box.small{padding:12px 12px 10px;height:240px;min-height:240px}
+.chart-box.small canvas{height:150px!important;max-height:150px}
+.floor-box{background:linear-gradient(180deg,var(--card),var(--card-soft));border-radius:18px;padding:16px;border:1px solid var(--border);box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:0}
+.floor-box h3{font-size:15px;color:var(--text);margin-bottom:10px;display:flex;align-items:center;justify-content:space-between}
+.floor-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+@media(max-width:1280px){.floor-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){.floor-grid{grid-template-columns:1fr}}
+.floor-card{border:1px solid var(--border);border-radius:14px;padding:12px 12px 10px;background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,0));display:flex;flex-direction:column;gap:8px;min-height:104px}
+body[data-theme="light"] .floor-card{background:linear-gradient(180deg,#fff,var(--card-soft))}
+.floor-card .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.floor-name{font-size:13px;font-weight:700}
+.floor-count{font-size:24px;font-weight:800;color:var(--accent);line-height:1}
+.floor-sub{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.floor-route{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);padding:6px 8px;border-radius:999px;background:rgba(127,127,127,.08)}
+.floor-list{margin-top:10px;overflow:auto;min-height:0;max-height:200px;border-top:1px solid var(--border);padding-top:10px;display:flex;flex-direction:column;gap:8px}
+.floor-task-row{display:grid;grid-template-columns:110px 76px 1fr 80px;gap:10px;align-items:center;padding:8px 10px;border:1px solid var(--border);border-radius:12px;background:rgba(127,127,127,.05)}
+@media(max-width:520px){.floor-task-row{grid-template-columns:1fr 1fr;gap:6px}}
+.floor-task-time{font-size:12px;color:var(--muted)}
+.floor-task-typ{font-weight:700;color:var(--accent)}
+.floor-task-route{font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.floor-task-status{justify-self:end;font-size:12px;color:var(--muted)}
+.route-inline{margin-top:10px;padding:8px 10px;border:1px dashed var(--border);border-radius:12px;display:flex;align-items:center;gap:8px;overflow-x:auto;overflow-y:hidden;white-space:nowrap}
+.route-inline-label{font-size:12px;color:var(--muted);font-weight:700;flex:0 0 auto}
+.route-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;background:rgba(127,127,127,.08);font-size:12px;line-height:1;flex:0 0 auto}
+.route-chip-count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:18px;padding:0 6px;border-radius:999px;color:#fff;background:var(--accent);font-size:11px;font-weight:800}
+.floor-list,.route-inline{-ms-overflow-style:none;scrollbar-width:none}
+.floor-list::-webkit-scrollbar,.route-inline::-webkit-scrollbar{width:0;height:0;display:none}
+.footer{text-align:center;padding:8px 12px 14px;font-size:11px;color:var(--muted)}
+.refresh-bar{text-align:right;padding:6px 16px;font-size:12px;color:var(--muted)}
 </style>
 </head>
-<body>
+<body data-theme="light">
 <header>
-  <h1>📊 AGV 任务统计</h1>
-  <button class="back" onclick="goBack()">← 返回</button>
+  <h1>📊 AGV 任务统计 <span style="font-size:12px;font-weight:400;opacity:.8">大屏看板</span></h1>
+  <div class="header-actions">
+    <button id="themeToggle" class="theme-btn" type="button">🌙 深色</button>
+    <button class="back" onclick="goBack()">← 返回</button>
+  </div>
 </header>
+
+<div class="app-shell">
 
 <div class="summary" id="summary">
   <div class="stat-card"><div class="num" id="s-total">-</div><div class="lbl">总任务数</div></div>
@@ -48,39 +125,185 @@ tr:hover td{background:#f9f9f9}
 
 <div class="refresh-bar" id="refresh-bar">-</div>
 
-<div class="charts">
-  <div class="chart-box" style="grid-column:1/-1">
-    <h3>近 30 天每日任务量</h3>
-    <canvas id="chartDay" height="160"></canvas>
+<div class="main-grid">
+  <div class="panel-stack">
+    <div class="hero-panel">
+      <h3>近 30 天任务趋势 <span class="sub">柱状 + 3 日均线，观察全天候波峰波谷</span></h3>
+      <canvas id="chartDay" height="210"></canvas>
+    </div>
+    <div class="floor-box">
+      <h3>当日楼层任务看板 <span class="sub" id="floorBoardMeta">按点位名称解析楼层</span></h3>
+      <div id="floorGrid" class="floor-grid"></div>
+      <div id="floorRouteBar" class="route-inline" style="display:none"></div>
+      <div id="floorTaskList" class="floor-list"></div>
+    </div>
   </div>
-  <div class="chart-box">
-    <h3>任务类型分布</h3>
-    <canvas id="chartTyp" height="180"></canvas>
-  </div>
-  <div class="chart-box">
-    <h3>成功 / 失败</h3>
-    <canvas id="chartStatus" height="180"></canvas>
+  <div class="panel-stack">
+    <div class="chart-box small">
+      <h3>任务类型分布</h3>
+      <canvas id="chartTyp" height="148"></canvas>
+    </div>
+    <div class="chart-box small">
+      <h3>成功 / 失败</h3>
+      <canvas id="chartStatus" height="148"></canvas>
+    </div>
+    <div class="chart-box">
+      <h3>近 7 天波动（点折线）</h3>
+      <canvas id="chartTrend" height="180"></canvas>
+    </div>
   </div>
 </div>
 
 <div class="footer">每 30 秒自动刷新</div>
 
+</div>
+
 <script>
 const qs = new URLSearchParams(window.location.search);
-const apiHostFromQuery = (qs.get('apiHost') || '').trim();
-const currentHost = (window.location.hostname || '').trim();
-const hostCandidates = [apiHostFromQuery, currentHost, 'localhost'].filter(Boolean);
-const uniqueHosts = Array.from(new Set(hostCandidates));
+const addressConfig = { backend: {} };
+let API_CANDIDATES = [];
 
-const API_CANDIDATES = [];
-if (/^https?:$/i.test(window.location.protocol)) {
-  API_CANDIDATES.push('/api/task-stats');
+function normalizeBaseUrl(urlText) {
+  const val = String(urlText || '').trim();
+  if (!val) return '';
+  if (/^https?:\/\//i.test(val)) return val.replace(/\/$/, '');
+  return ('http://' + val).replace(/\/$/, '');
 }
-uniqueHosts.forEach(host => {
-  API_CANDIDATES.push('http://' + host + ':3000/api/task-stats');
-});
 
-let chartDay, chartTyp, chartStatus;
+async function loadAddressConfig() {
+  try {
+    const resp = await fetch('./request-address-config.json?t=' + Date.now(), { cache: 'no-store' });
+    if (!resp.ok) return;
+    const cfg = await resp.json();
+    if (cfg && typeof cfg === 'object') {
+      addressConfig.backend = cfg.backend || {};
+    }
+  } catch (e) {
+    // 配置不可用时忽略
+  }
+}
+
+function buildApiCandidates() {
+  const list = [];
+  const apiHostFromQuery = normalizeBaseUrl(qs.get('apiHost') || '');
+  const fromCfg = normalizeBaseUrl(addressConfig?.backend?.baseUrl || '');
+
+  if (/^https?:$/i.test(window.location.protocol)) {
+    list.push('/api/task-stats');
+    list.push(window.location.origin.replace(/\/$/, '') + '/api/task-stats');
+  }
+
+  if (apiHostFromQuery) {
+    list.push(apiHostFromQuery + '/api/task-stats');
+  }
+  if (fromCfg) {
+    list.push(fromCfg + '/api/task-stats');
+  }
+
+  const host = String(window.location.hostname || '').trim();
+  if (host) {
+    list.push('http://' + host + ':3000/api/task-stats');
+  }
+  list.push('http://127.0.0.1:3000/api/task-stats');
+  list.push('http://localhost:3000/api/task-stats');
+
+  API_CANDIDATES = Array.from(new Set(list.filter(Boolean)));
+}
+
+const THEME_KEY = 'agv_stats_theme_v1';
+let chartDay, chartTrend, chartTyp, chartStatus;
+let routeScrollTimer = null;
+let taskListScrollTimer = null;
+
+function stopAutoScrollTimers() {
+  if (routeScrollTimer) {
+    clearInterval(routeScrollTimer);
+    routeScrollTimer = null;
+  }
+  if (taskListScrollTimer) {
+    clearInterval(taskListScrollTimer);
+    taskListScrollTimer = null;
+  }
+}
+
+function bindAutoScroll(container, axis, step, intervalMs, assignTimer) {
+  if (!container) return;
+  let paused = false;
+
+  const onEnter = () => { paused = true; };
+  const onLeave = () => { paused = false; };
+  container.addEventListener('mouseenter', onEnter);
+  container.addEventListener('mouseleave', onLeave);
+
+  const timer = setInterval(() => {
+    if (paused) return;
+    if (axis === 'x') {
+      const max = container.scrollWidth - container.clientWidth;
+      if (max <= 0) return;
+      const next = container.scrollLeft + step;
+      container.scrollLeft = next >= max ? 0 : next;
+      return;
+    }
+
+    const max = container.scrollHeight - container.clientHeight;
+    if (max <= 0) return;
+    const next = container.scrollTop + step;
+    container.scrollTop = next >= max ? 0 : next;
+  }, intervalMs);
+
+  assignTimer(timer);
+}
+
+function startDashboardAutoScroll() {
+  stopAutoScrollTimers();
+  const routeEl = document.getElementById('floorRouteBar');
+  const listEl = document.getElementById('floorTaskList');
+  bindAutoScroll(routeEl, 'x', 1, 35, (timer) => { routeScrollTimer = timer; });
+  bindAutoScroll(listEl, 'y', 1, 55, (timer) => { taskListScrollTimer = timer; });
+}
+
+function getThemePalette() {
+  const dark = document.body.dataset.theme === 'dark';
+  return {
+    text: dark ? '#d9e3ef' : '#243042',
+    subText: dark ? '#9bb0c7' : '#6f7f93',
+    grid: dark ? '#334253' : '#d8e2ee',
+    accent: dark ? '#57a0ff' : '#2b7fff',
+    accentSoft: dark ? 'rgba(87,160,255,.2)' : 'rgba(43,127,255,.2)',
+    bar: dark ? 'rgba(87,160,255,.65)' : 'rgba(66,165,245,.75)',
+    ok: dark ? '#33c381' : '#1f9d55',
+    err: dark ? '#ff6b6b' : '#d64545',
+    neutral: dark ? '#8aa0b9' : '#8ea1b8'
+  };
+}
+
+function syncThemeToggleLabel() {
+  const btn = document.getElementById('themeToggle');
+  if (!btn) return;
+  if (document.body.dataset.theme === 'dark') {
+    btn.textContent = '☀️ 浅色';
+  } else {
+    btn.textContent = '🌙 深色';
+  }
+}
+
+function setTheme(theme) {
+  const finalTheme = theme === 'dark' ? 'dark' : 'light';
+  document.body.dataset.theme = finalTheme;
+  localStorage.setItem(THEME_KEY, finalTheme);
+  syncThemeToggleLabel();
+  applyChartTheme();
+}
+
+function initTheme() {
+  const saved = localStorage.getItem(THEME_KEY);
+  if (saved === 'dark' || saved === 'light') {
+    setTheme(saved);
+    return;
+  }
+  const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  setTheme(prefersDark ? 'dark' : 'light');
+}
 
 function goBack() {
   if (window.history.length > 1) {
@@ -112,7 +335,33 @@ function getPositionNameMap() {
   }
 }
 
+function getPositionMetaMap() {
+  try {
+    const options = window.AGV_APP_CONFIG
+      ?.fieldConfig
+      ?.genAgvSchedulingTask
+      ?.positionCodePath
+      ?.positionCode;
+    if (!Array.isArray(options)) {
+      return {};
+    }
+    const map = {};
+    options.forEach(item => {
+      if (item && item.value != null) {
+        map[String(item.value)] = {
+          label: String(item.label || ''),
+          mapShortName: String(item.map || '').trim(),
+        };
+      }
+    });
+    return map;
+  } catch (e) {
+    return {};
+  }
+}
+
 const POSITION_NAME_MAP = getPositionNameMap();
+const POSITION_META_MAP = getPositionMetaMap();
 
 function toPositionName(code) {
   const key = String(code || '').trim();
@@ -120,6 +369,138 @@ function toPositionName(code) {
     return '-';
   }
   return POSITION_NAME_MAP[key] || key;
+}
+
+function getPositionLabel(code) {
+  const key = String(code || '').trim();
+  if (!key) return '-';
+  return POSITION_META_MAP[key]?.label || POSITION_NAME_MAP[key] || key;
+}
+
+function getFloorFromText(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return '未知楼层';
+  const match = raw.match(/([一二三四五六七八九十])楼/);
+  if (match && match[1]) {
+    return match[1] + '楼';
+  }
+  if (raw.includes('地下')) return '地下';
+  return '未知楼层';
+}
+
+function getFloorFromPositionCode(code) {
+  const label = getPositionLabel(code);
+  return getFloorFromText(label);
+}
+
+function parsePositionCodePath(raw) {
+  if (!raw) return [];
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function getTaskRouteInfo(row) {
+  const codes = parsePositionCodePath(row?.position_codes || '');
+  const fromCode = String(codes[0]?.positionCode || codes[0] || '').trim();
+  const toCode = String(codes[1]?.positionCode || codes[1] || '').trim();
+  const fromLabel = getPositionLabel(fromCode);
+  const toLabel = getPositionLabel(toCode);
+  const fromFloor = getFloorFromPositionCode(fromCode);
+  const toFloor = getFloorFromPositionCode(toCode);
+  const routeKey = fromFloor + ' → ' + toFloor;
+  return {
+    fromCode,
+    toCode,
+    fromLabel,
+    toLabel,
+    fromFloor,
+    toFloor,
+    routeKey,
+    routeLabel: fromFloor + ' → ' + toFloor,
+  };
+}
+
+function escapeHtml(text) {
+  return String(text || '').replace(/[&<>"]|'/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
+}
+
+function buildFloorStats(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const counts = new Map();
+  const routes = new Map();
+  list.forEach(row => {
+    const info = getTaskRouteInfo(row);
+    const floors = [info.fromFloor, info.toFloor].filter(Boolean);
+    floors.forEach(floor => {
+      counts.set(floor, (counts.get(floor) || 0) + 1);
+    });
+    routes.set(info.routeKey, (routes.get(info.routeKey) || 0) + 1);
+  });
+
+  const floorCards = Array.from(counts.entries())
+    .map(([floor, count]) => ({ floor, count }))
+    .sort((a, b) => b.count - a.count);
+
+  const routeCards = Array.from(routes.entries())
+    .map(([route, count]) => ({ route, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 6);
+
+  return { floorCards, routeCards };
+}
+
+function renderFloorDashboard(rows) {
+  const { floorCards, routeCards } = buildFloorStats(rows);
+  const floorGrid = document.getElementById('floorGrid');
+  const floorTaskList = document.getElementById('floorTaskList');
+  const floorRouteBar = document.getElementById('floorRouteBar');
+  const floorBoardMeta = document.getElementById('floorBoardMeta');
+  if (!floorGrid || !floorTaskList || !floorBoardMeta || !floorRouteBar) return;
+
+  const floorNameSet = Array.from(new Set(floorCards.map(item => item.floor)));
+  floorBoardMeta.textContent = floorNameSet.length > 0 ? ('已识别 ' + floorNameSet.length + ' 个楼层') : '未识别楼层';
+
+  const palette = getThemePalette();
+  floorGrid.innerHTML = floorCards.length > 0 ? floorCards.map(item => {
+    return '<div class="floor-card">' +
+      '<div class="top"><div class="floor-name">' + escapeHtml(item.floor) + '</div><div class="floor-route">楼层任务</div></div>' +
+      '<div class="floor-count">' + escapeHtml(String(item.count)) + '</div>' +
+      '<div class="floor-sub">按发货点 / 收货点累计</div>' +
+    '</div>';
+  }).join('') : '<div style="color:' + palette.subText + ';padding:8px 2px">暂无可识别的楼层任务</div>';
+
+  const recentRows = Array.isArray(rows) ? rows.slice(0, 10) : [];
+  floorTaskList.innerHTML = recentRows.map(row => {
+    const route = getTaskRouteInfo(row);
+    const taskTyp = String(row.task_typ || '-');
+    const createdAt = String(row.created_at || '-');
+    const status = Number(row.resp_status) === 200 ? '成功' : '失败';
+    return '<div class="floor-task-row">' +
+      '<div class="floor-task-time">' + escapeHtml(createdAt.slice(11, 19) || createdAt) + '</div>' +
+      '<div class="floor-task-typ">' + escapeHtml(taskTyp) + '</div>' +
+      '<div class="floor-task-route">' + escapeHtml(route.fromFloor + ' · ' + route.fromLabel + ' → ' + route.toFloor + ' · ' + route.toLabel) + '</div>' +
+      '<div class="floor-task-status">' + escapeHtml(status) + '</div>' +
+    '</div>';
+  }).join('');
+
+  if (routeCards.length > 0) {
+    floorRouteBar.style.display = 'flex';
+    floorRouteBar.innerHTML = '<span class="route-inline-label">热度</span>' + routeCards.map(item =>
+      '<span class="route-chip">' +
+        '<span>' + escapeHtml(item.route) + '</span>' +
+        '<span class="route-chip-count">' + escapeHtml(String(item.count)) + '</span>' +
+      '</span>'
+    ).join('');
+  } else {
+    floorRouteBar.style.display = 'none';
+    floorRouteBar.innerHTML = '';
+  }
+
+  startDashboardAutoScroll();
 }
 
 function normalizeStatsPayload(payload) {
@@ -132,6 +513,17 @@ function normalizeStatsPayload(payload) {
     byStatus: payload.byStatus && typeof payload.byStatus === 'object' ? payload.byStatus : {},
     recent: Array.isArray(payload.recent) ? payload.recent : []
   };
+}
+
+function movingAverage(values, windowSize) {
+  const list = Array.isArray(values) ? values : [];
+  const win = Math.max(1, Number(windowSize) || 1);
+  return list.map((_, index) => {
+    const start = Math.max(0, index - win + 1);
+    const chunk = list.slice(start, index + 1);
+    const sum = chunk.reduce((acc, n) => acc + Number(n || 0), 0);
+    return Math.round((sum / chunk.length) * 10) / 10;
+  });
 }
 
 async function fetchStats() {
@@ -156,11 +548,17 @@ async function fetchStats() {
 }
 
 function buildDayChart(data) {
+  const palette = getThemePalette();
   const labels = data.map(r => r.day);
   const values = data.map(r => r.cnt);
+  const trend = movingAverage(values, 3);
   if (chartDay) {
     chartDay.data.labels = labels;
     chartDay.data.datasets[0].data = values;
+    chartDay.data.datasets[1].data = trend;
+    chartDay.data.datasets[0].backgroundColor = palette.bar;
+    chartDay.data.datasets[1].borderColor = palette.accent;
+    chartDay.data.datasets[1].backgroundColor = palette.accentSoft;
     chartDay.update();
     return;
   }
@@ -168,24 +566,91 @@ function buildDayChart(data) {
     type: 'bar',
     data: {
       labels,
-      datasets: [{ label: '任务数', data: values,
-        backgroundColor: '#42a5f5', borderRadius: 4 }]
+      datasets: [
+        {
+          type: 'bar',
+          label: '当日任务',
+          data: values,
+          backgroundColor: palette.bar,
+          borderRadius: 6,
+          maxBarThickness: 24
+        },
+        {
+          type: 'line',
+          label: '3日均线',
+          data: trend,
+          borderColor: palette.accent,
+          backgroundColor: palette.accentSoft,
+          pointRadius: 3,
+          pointHoverRadius: 5,
+          tension: .3,
+          fill: false
+        }
+      ]
     },
     options: {
       responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'top', labels: { color: palette.subText, boxWidth: 12 } } },
+      scales: {
+        x: { ticks: { color: palette.subText }, grid: { color: 'transparent' } },
+        y: { beginAtZero: true, ticks: { precision: 0, color: palette.subText }, grid: { color: palette.grid } }
+      }
+    }
+  });
+}
+
+function buildTrendChart(data) {
+  const palette = getThemePalette();
+  const rows = Array.isArray(data) ? data.slice(-7) : [];
+  const labels = rows.map(r => String(r.day || '').slice(5));
+  const values = rows.map(r => Number(r.cnt || 0));
+  if (chartTrend) {
+    chartTrend.data.labels = labels;
+    chartTrend.data.datasets[0].data = values;
+    chartTrend.data.datasets[0].borderColor = palette.accent;
+    chartTrend.data.datasets[0].backgroundColor = palette.accentSoft;
+    chartTrend.update();
+    return;
+  }
+  chartTrend = new Chart(document.getElementById('chartTrend'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: '任务数',
+        data: values,
+        borderColor: palette.accent,
+        backgroundColor: palette.accentSoft,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        pointBackgroundColor: palette.accent,
+        pointStyle: 'circle',
+        tension: .35,
+        fill: true
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
       plugins: { legend: { display: false } },
-      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+      scales: {
+        x: { ticks: { color: palette.subText }, grid: { color: 'transparent' } },
+        y: { beginAtZero: true, ticks: { precision: 0, color: palette.subText }, grid: { color: palette.grid } }
+      }
     }
   });
 }
 
 function buildTypChart(data) {
+  const palette = getThemePalette();
   const labels = data.map(r => r.task_typ || '未知');
   const values = data.map(r => r.cnt);
-  const colors = ['#42a5f5','#66bb6a','#ffa726','#ef5350','#ab47bc','#26c6da'];
+  const colors = ['#42a5f5','#66bb6a','#ffa726','#ef5350','#ab47bc','#26c6da','#7e57c2','#ec407a'];
   if (chartTyp) {
     chartTyp.data.labels = labels;
     chartTyp.data.datasets[0].data = values;
+    chartTyp.options.plugins.legend.labels.color = palette.subText;
     chartTyp.update();
     return;
   }
@@ -197,16 +662,20 @@ function buildTypChart(data) {
     },
     options: {
       responsive: true,
-      plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } }
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: { font: { size: 11 }, color: palette.subText } } }
     }
   });
 }
 
 function buildStatusChart(data) {
+  const palette = getThemePalette();
   const labels = ['成功', '失败', '未知'];
   const values = [data.success || 0, data.failed || 0, data.unknown || 0];
   if (chartStatus) {
     chartStatus.data.datasets[0].data = values;
+    chartStatus.data.datasets[0].backgroundColor = [palette.ok,palette.err,palette.neutral];
+    chartStatus.options.plugins.legend.labels.color = palette.subText;
     chartStatus.update();
     return;
   }
@@ -214,12 +683,34 @@ function buildStatusChart(data) {
     type: 'pie',
     data: {
       labels,
-      datasets: [{ data: values, backgroundColor: ['#66bb6a','#ef5350','#bdbdbd'] }]
+      datasets: [{ data: values, backgroundColor: [palette.ok,palette.err,palette.neutral] }]
     },
     options: {
       responsive: true,
-      plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } }
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: { font: { size: 11 }, color: palette.subText } } }
     }
+  });
+}
+
+function applyChartTheme() {
+  const palette = getThemePalette();
+  const charts = [chartDay, chartTrend, chartTyp, chartStatus].filter(Boolean);
+  charts.forEach(c => {
+    if (c.options && c.options.plugins && c.options.plugins.legend && c.options.plugins.legend.labels) {
+      c.options.plugins.legend.labels.color = palette.subText;
+    }
+    if (c.options && c.options.scales) {
+      ['x','y'].forEach(axis => {
+        if (c.options.scales[axis] && c.options.scales[axis].ticks) {
+          c.options.scales[axis].ticks.color = palette.subText;
+        }
+        if (c.options.scales[axis] && c.options.scales[axis].grid) {
+          c.options.scales[axis].grid.color = axis === 'x' ? 'transparent' : palette.grid;
+        }
+      });
+    }
+    c.update('none');
   });
 }
 
@@ -242,8 +733,11 @@ async function load() {
     document.getElementById('s-failed').textContent  = failed;
 
     buildDayChart(d.byDay || []);
+    buildTrendChart(d.byDay || []);
     if (d.byTyp && d.byTyp.length) buildTypChart(d.byTyp);
     if (d.byStatus) buildStatusChart(d.byStatus);
+    renderFloorDashboard(d.recent || []);
+    applyChartTheme();
 
     document.getElementById('refresh-bar').textContent =
       '最后更新：' + new Date().toLocaleTimeString('zh-CN');
@@ -253,7 +747,17 @@ async function load() {
   }
 }
 
-load();
+document.getElementById('themeToggle').addEventListener('click', () => {
+  const next = document.body.dataset.theme === 'dark' ? 'light' : 'dark';
+  setTheme(next);
+});
+
+initTheme();
+(async () => {
+  await loadAddressConfig();
+  buildApiCandidates();
+  load();
+})();
 setInterval(load, 30000);
 </script>
 </body>

@@ -51,7 +51,7 @@ th{background:#f5f5f5;color:#555;font-weight:600}
 <div class="wrap">
   <div class="panel table-box">
     <div class="panel-head">
-      <label>任务记录（最近20条）</label>
+      <label>任务记录（当日）</label>
       <div class="actions" style="margin:0">
         <span id="taskRecordMeta" class="task-meta">未加载</span>
         <button id="refreshTaskRecordsBtn" class="mini-btn" type="button">刷新任务记录</button>
@@ -73,8 +73,6 @@ th{background:#f5f5f5;color:#555;font-weight:600}
           <th>任务编号</th>
           <th>发货点</th>
           <th>收货点</th>
-          <th>状态</th>
-          <th>响应</th>
           <th>任务状态</th>
           <th>操作</th>
         </tr>
@@ -201,15 +199,67 @@ function escapeHtml(text) {
 function extractTaskCodeFromResp(respBody) {
   const raw = String(respBody || '').trim();
   if (!raw) return '';
+
+  function pickTaskCode(obj) {
+    if (!obj || typeof obj !== 'object') {
+      return '';
+    }
+
+    const direct = [
+      obj.taskCode,
+      obj.task_code,
+      obj.mainTaskCode,
+      obj.main_task_code,
+      obj.code,
+    ];
+    for (const val of direct) {
+      const text = String(val == null ? '' : val).trim();
+      if (text && text !== '[object Object]') {
+        return text;
+      }
+    }
+
+    if (Array.isArray(obj.data)) {
+      for (const item of obj.data) {
+        const found = pickTaskCode(item);
+        if (found) return found;
+      }
+    }
+
+    if (obj.data && typeof obj.data === 'object') {
+      const found = pickTaskCode(obj.data);
+      if (found) return found;
+    }
+
+    return '';
+  }
+
   try {
     const parsed = JSON.parse(raw);
-    const taskCode = String(parsed?.data || '').trim();
-    if (taskCode) return taskCode;
+    const fromStructured = pickTaskCode(parsed);
+    if (fromStructured) return fromStructured;
+
+    const dataVal = String(parsed?.data == null ? '' : parsed.data).trim();
+    if (dataVal && dataVal !== '[object Object]') return dataVal;
   } catch (e) {
     // 非JSON时继续用正则尝试
   }
-  const match = raw.match(/"data"\s*:\s*"([^"]+)"/);
-  return match && match[1] ? String(match[1]).trim() : '';
+
+  const keyPatterns = [
+    /"taskCode"\s*:\s*"([^"]+)"/,
+    /"task_code"\s*:\s*"([^"]+)"/,
+    /"mainTaskCode"\s*:\s*"([^"]+)"/,
+    /"main_task_code"\s*:\s*"([^"]+)"/,
+    /"data"\s*:\s*"([^"]+)"/
+  ];
+
+  for (const pattern of keyPatterns) {
+    const match = raw.match(pattern);
+    const value = match && match[1] ? String(match[1]).trim() : '';
+    if (value) return value;
+  }
+
+  return '';
 }
 
 function extractAgvCodeFromRawBody(rawBody) {
@@ -224,6 +274,64 @@ function extractAgvCodeFromRawBody(rawBody) {
   }
   const match = raw.match(/"agvCode"\s*:\s*"([^"]+)"/);
   return match && match[1] ? String(match[1]).trim() : '';
+}
+
+function extractTaskCodeFromRawBody(rawBody) {
+  const raw = String(rawBody || '').trim();
+  if (!raw) return '';
+  try {
+    const parsed = JSON.parse(raw);
+    const direct = [
+      parsed?.taskCode,
+      parsed?.task_code,
+      parsed?.mainTaskCode,
+      parsed?.main_task_code,
+      parsed?.code,
+    ];
+    for (const val of direct) {
+      const text = String(val == null ? '' : val).trim();
+      if (text && text !== '[object Object]') {
+        return text;
+      }
+    }
+  } catch (e) {
+    // 非JSON时继续用正则尝试
+  }
+
+  const keyPatterns = [
+    /"taskCode"\s*:\s*"([^"]+)"/,
+    /"task_code"\s*:\s*"([^"]+)"/,
+    /"mainTaskCode"\s*:\s*"([^"]+)"/,
+    /"main_task_code"\s*:\s*"([^"]+)"/
+  ];
+  for (const pattern of keyPatterns) {
+    const match = raw.match(pattern);
+    const value = match && match[1] ? String(match[1]).trim() : '';
+    if (value) return value;
+  }
+
+  return '';
+}
+
+function extractTaskCodeFromStatusItem(item) {
+  if (!item || typeof item !== 'object') {
+    return '';
+  }
+  const candidates = [
+    item.taskCode,
+    item.task_code,
+    item.mainTaskCode,
+    item.main_task_code,
+    item.code,
+    item.data,
+  ];
+  for (const val of candidates) {
+    const text = String(val == null ? '' : val).trim();
+    if (text && text !== '[object Object]') {
+      return text;
+    }
+  }
+  return '';
 }
 
 function normalizeTaskStatusLabel(rawStatus) {
@@ -244,6 +352,11 @@ function normalizeTaskStatusLabel(rawStatus) {
 function isTaskDone(rawStatus) {
   const val = String(rawStatus == null ? '' : rawStatus).trim().toLowerCase();
   return val === '9' || val === 'done' || val === 'finish' || val === 'finished' || val === 'end' || val.includes('完成');
+}
+
+function isTaskRunning(rawStatus) {
+  const val = String(rawStatus == null ? '' : rawStatus).trim().toLowerCase();
+  return val === '2' || val === 'running' || val === 'executing' || val.includes('执行中') || val.includes('正在执行');
 }
 
 function isTaskTerminalStatus(rawStatus) {
@@ -285,9 +398,8 @@ async function callProxyJson(targetUrl, body) {
 
 async function batchQueryTaskStatus(taskRecords) {
   const records = Array.isArray(taskRecords) ? taskRecords : [];
-  const agvCodes = Array.from(new Set(records.map(item => String(item?.agvCode || '').trim()).filter(Boolean)));
   const expectedTaskCodes = Array.from(new Set(records.map(item => String(item?.taskCode || '').trim()).filter(Boolean)));
-  if (agvCodes.length === 0 && expectedTaskCodes.length === 0) {
+  if (expectedTaskCodes.length === 0) {
     return {};
   }
   const targetBase = getTargetRcsBaseUrl();
@@ -296,45 +408,41 @@ async function batchQueryTaskStatus(taskRecords) {
   }
   const map = {};
 
-  for (const agvCode of agvCodes) {
+  async function queryByTaskCode(taskCode) {
     const payload = {
-      reqCode: String(Date.now()),
-      reqTime: '',
-      clientCode: '',
-      tokenCode: '',
-      agvCode,
-      taskCodes: ['']
-    };
-    try {
-      const data = await callProxyJson(targetBase + TASK_STATUS_ENDPOINT, payload);
-      const rows = Array.isArray(data?.data) ? data.data : [];
-      rows.forEach(item => {
-        const code = String(item?.taskCode || '').trim();
-        if (code) {
-          map[code] = item;
-        }
-      });
-    } catch (e) {
-      // 单个AGV查询失败时，后续再按任务号兜底
-    }
-  }
-
-  const fallbackTaskCodes = expectedTaskCodes.filter(code => !map[code]);
-  if (fallbackTaskCodes.length > 0) {
-    const payload = {
-      reqCode: String(Date.now()),
+      reqCode: String(Date.now()) + '-' + taskCode,
       reqTime: '',
       clientCode: '',
       tokenCode: '',
       agvCode: '',
-      taskCodes: fallbackTaskCodes
+      taskCodes: [taskCode]
     };
     const data = await callProxyJson(targetBase + TASK_STATUS_ENDPOINT, payload);
     const rows = Array.isArray(data?.data) ? data.data : [];
-    rows.forEach(item => {
-      const code = String(item?.taskCode || '').trim();
-      if (code && !map[code]) {
-        map[code] = item;
+    if (rows.length === 0) {
+      return null;
+    }
+
+    const exact = rows.find(item => extractTaskCodeFromStatusItem(item) === taskCode);
+    return exact || rows[0] || null;
+  }
+
+  const concurrency = 6;
+  for (let i = 0; i < expectedTaskCodes.length; i += concurrency) {
+    const chunk = expectedTaskCodes.slice(i, i + concurrency);
+    const settled = await Promise.allSettled(chunk.map(async (taskCode) => {
+      const row = await queryByTaskCode(taskCode);
+      return { taskCode, row };
+    }));
+
+    settled.forEach((result) => {
+      if (result.status !== 'fulfilled') {
+        return;
+      }
+      const taskCode = result.value.taskCode;
+      const row = result.value.row;
+      if (taskCode && row) {
+        map[taskCode] = row;
       }
     });
   }
@@ -371,7 +479,9 @@ function getActionCellHtml(agvCode, rawStatus) {
 
 function getStatusBadgeHtml(rawStatus) {
   const label = normalizeTaskStatusLabel(rawStatus);
-  const cls = isTaskDone(rawStatus) ? 'status-badge done' : 'status-badge pending';
+  const cls = isTaskDone(rawStatus)
+    ? 'status-badge done'
+    : (isTaskRunning(rawStatus) ? 'status-badge pending' : 'status-badge');
   return '<span class="' + cls + '">' + escapeHtml(label) + '</span>';
 }
 
@@ -478,7 +588,7 @@ function renderTaskRecordRows(rows, taskStatusMap) {
   const tbody = document.getElementById('taskRecordTbody');
   const statusMap = taskStatusMap || {};
   if (!Array.isArray(rows) || rows.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" class="task-record-empty">暂无任务记录</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="task-record-empty">暂无任务记录</td></tr>';
     return;
   }
 
@@ -495,20 +605,24 @@ function renderTaskRecordRows(rows, taskStatusMap) {
       first = '-';
       second = '-';
     }
-    const status = Number(r.resp_status) === 200 ? '成功' : '失败';
-    const respText = String(r.resp_body || '').slice(0, 120);
     const requestAgvCode = extractAgvCodeFromRawBody(r.raw_body || '');
-    const taskCode = extractTaskCodeFromResp(r.resp_body || '');
+    const taskCode = String(r.task_code || '').trim() || extractTaskCodeFromResp(r.resp_body || '') || extractTaskCodeFromRawBody(r.raw_body || '');
     const taskInfo = taskCode && statusMap[taskCode] ? statusMap[taskCode] : null;
-    const taskStateRaw = taskInfo ? taskInfo.taskStatus : '';
+    const taskStateRaw = taskInfo
+      ? (
+        taskInfo.taskStatus ??
+        taskInfo.task_status ??
+        taskInfo.taskstatus ??
+        taskInfo.status ??
+        ''
+      )
+      : '';
     const agvCode = String(taskInfo?.agvCode || requestAgvCode || '').trim();
     return '<tr>' +
       '<td>' + escapeHtml(String(r.created_at || '-')) + '</td>' +
       '<td>' + escapeHtml(String(r.task_typ || '-')) + '</td>' +
       '<td>' + escapeHtml(first) + '</td>' +
       '<td>' + escapeHtml(second) + '</td>' +
-      '<td>' + escapeHtml(status + ' (' + String(r.resp_status || '-') + ')') + '</td>' +
-      '<td>' + escapeHtml(respText) + '</td>' +
       '<td>' + getStatusBadgeHtml(taskStateRaw) + '</td>' +
       '<td>' + getActionCellHtml(agvCode, taskStateRaw) + '</td>' +
     '</tr>';
@@ -544,7 +658,8 @@ async function loadTaskRecords() {
       }
       taskStatusMapCache = statusMap;
       renderTaskRecordRows(rows, statusMap);
-      metaEl.textContent = '已更新: ' + new Date().toLocaleTimeString('zh-CN') + ' | ' + rows.length + ' 条 | 状态同步 ' + Object.keys(statusMap).length + ' 条';
+      const syncedCount = Object.keys(statusMap).length;
+      metaEl.textContent = '已更新: ' + new Date().toLocaleTimeString('zh-CN') + ' | ' + rows.length + ' 条 | 状态同步 ' + syncedCount + ' 条';
       return;
     } catch (e) {
       lastError = String(e && e.message ? e.message : e);

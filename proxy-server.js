@@ -248,6 +248,256 @@ app.post("/api/task-log/recent-success", async (req, res) => {
   }
 });
 
+// ── 防重复检查：按 position_codes 两个点位值判重 ───────────────────
+app.post("/api/task-log/check-duplicate", async (req, res) => {
+  try {
+    const { taskTyp, fromCode, toCode, seconds } = req.body || {};
+    const from = String(fromCode || "").trim();
+    const to = String(toCode || "").trim();
+    const typ = String(taskTyp || "").trim();
+    const winSeconds = Number(seconds) > 0 ? Number(seconds) : 0;
+
+    if (!from || !to) {
+      return res.json({
+        ok: true,
+        exists: false,
+        reason: "fromCode or toCode empty",
+      });
+    }
+
+    const p = await getPool();
+    const dbReq = p
+      .request()
+      .input("from_code", sql.NVarChar(100), from)
+      .input("to_code", sql.NVarChar(100), to)
+      .input("task_typ", sql.NVarChar(50), typ)
+      .input("sec", sql.Int, winSeconds);
+
+    const sqlText = `
+      SELECT TOP 1
+        CONVERT(NVARCHAR(19), created_at, 120) AS created_at,
+        req_code,
+        task_typ,
+        resp_status,
+        COALESCE(JSON_VALUE(position_codes, '$[0].positionCode'), JSON_VALUE(position_codes, '$[0]')) AS from_code,
+        COALESCE(JSON_VALUE(position_codes, '$[1].positionCode'), JSON_VALUE(position_codes, '$[1]')) AS to_code
+      FROM task_log
+      WHERE COALESCE(JSON_VALUE(position_codes, '$[0].positionCode'), JSON_VALUE(position_codes, '$[0]')) = @from_code
+        AND COALESCE(JSON_VALUE(position_codes, '$[1].positionCode'), JSON_VALUE(position_codes, '$[1]')) = @to_code
+        AND (@task_typ = '' OR task_typ = @task_typ)
+        AND (resp_status = 200 OR resp_status = 0)
+        AND (@sec <= 0 OR created_at >= DATEADD(SECOND, -@sec, GETDATE()))
+      ORDER BY id DESC
+    `;
+
+    const result = await dbReq.query(sqlText);
+    const row = result.recordset[0] || null;
+
+    res.json({
+      ok: true,
+      exists: !!row,
+      windowSeconds: winSeconds,
+      row,
+    });
+  } catch (err) {
+    console.error("[DB] check-duplicate error:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── 站点占用检查：检查目标站点是否已有正在执行或已创建的任务 ────────
+app.post("/api/task-log/check-occupancy", async (req, res) => {
+  try {
+    const { fromCode, toCode } = req.body || {};
+    const from = String(fromCode || "").trim();
+    const to = String(toCode || "").trim();
+
+    if (!from || !to) {
+      return res.json({
+        ok: true,
+        occupied: false,
+        reason: "fromCode or toCode empty",
+      });
+    }
+
+    const p = await getPool();
+    
+    function tryParseJson(raw, fallback = null) {
+      try {
+        if (raw === null || raw === undefined) return fallback;
+        if (typeof raw === "object") return raw;
+        return JSON.parse(String(raw));
+      } catch (_) {
+        return fallback;
+      }
+    }
+
+    function extractCreatedTaskCode(taskRow) {
+      const respBodyObj = tryParseJson(taskRow.resp_body, null);
+      const rawBodyObj = tryParseJson(taskRow.raw_body, null);
+      const fromResp = respBodyObj && respBodyObj.data ? String(respBodyObj.data).trim() : "";
+      const fromRaw = rawBodyObj && rawBodyObj.taskCode ? String(rawBodyObj.taskCode).trim() : "";
+      return fromResp || fromRaw || "";
+    }
+
+    // 查询涉及这两个站点的任务（只取本系统成功/待定响应的任务日志）
+    const sqlText = `
+      SELECT TOP 120
+             id, req_code, task_typ, raw_body, resp_body, resp_status, position_codes,
+             COALESCE(JSON_VALUE(position_codes, '$[0].positionCode'), JSON_VALUE(position_codes, '$[0]')) AS from_code,
+             COALESCE(JSON_VALUE(position_codes, '$[1].positionCode'), JSON_VALUE(position_codes, '$[1]')) AS to_code
+      FROM task_log
+      WHERE (
+        COALESCE(JSON_VALUE(position_codes, '$[0].positionCode'), JSON_VALUE(position_codes, '$[0]')) IN (@from_code, @to_code)
+        OR COALESCE(JSON_VALUE(position_codes, '$[1].positionCode'), JSON_VALUE(position_codes, '$[1]')) IN (@from_code, @to_code)
+      )
+        AND (resp_status = 200 OR resp_status = 0)
+      ORDER BY id DESC
+    `;
+
+    const result = await p
+      .request()
+      .input("from_code", sql.NVarChar(100), from)
+      .input("to_code", sql.NVarChar(100), to)
+      .query(sqlText);
+
+    const tasks = result.recordset || [];
+    
+    // 批量收集候选 taskCode，避免逐条请求 queryTaskStatus 导致 5-10s 延时
+    const queryUrl = "http://192.168.111.70:8182/rcms/services/rest/hikRpcService/queryTaskStatus";
+    const codeMetaMap = new Map();
+    const candidateTaskCodes = [];
+    for (const task of tasks) {
+      const taskCode = extractCreatedTaskCode(task);
+      if (!taskCode || codeMetaMap.has(taskCode)) continue;
+      const rawBodyObj = tryParseJson(task.raw_body, {});
+      codeMetaMap.set(taskCode, {
+        agvCode: String(rawBodyObj.agvCode || rawBodyObj.robotCode || "").trim(),
+      });
+      candidateTaskCodes.push(taskCode);
+    }
+
+    const activeStatusByTaskCode = new Map();
+    const chunkSize = 30;
+    for (let i = 0; i < candidateTaskCodes.length; i += chunkSize) {
+      const chunk = candidateTaskCodes.slice(i, i + chunkSize);
+      if (chunk.length === 0) continue;
+      try {
+        const statusResp = await fetch(queryUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          timeout: 5000,
+          body: JSON.stringify({
+            reqCode: "sys-" + Date.now() + "-" + i,
+            agvCode: "",
+            taskCodes: chunk,
+          }),
+        });
+        if (!statusResp.ok) continue;
+        const statusData = await statusResp.json();
+        const rows = Array.isArray(statusData && statusData.data) ? statusData.data : [];
+        for (const row of rows) {
+          const tCode = String(row && row.taskCode ? row.taskCode : "").trim();
+          const status = String(row && row.taskStatus ? row.taskStatus : "").trim();
+          if (!tCode) continue;
+          if (status === "1" || status === "2") {
+            activeStatusByTaskCode.set(tCode, status);
+          }
+        }
+      } catch (e) {
+        console.error("[Occupancy Check] batch status query error:", e.message);
+      }
+    }
+
+    // 检查任务状态：优先按 taskCode 精确判断
+    let occupiedBy = null;
+    const taskCodePointMap = new Map();
+    for (const task of tasks) {
+      const candidateTaskCode = extractCreatedTaskCode(task);
+      if (!candidateTaskCode) continue;
+      const blockedPoint = task.from_code === from || task.from_code === to ? task.from_code : task.to_code;
+      if (!taskCodePointMap.has(candidateTaskCode)) {
+        taskCodePointMap.set(candidateTaskCode, blockedPoint);
+      }
+      const status = activeStatusByTaskCode.get(candidateTaskCode);
+      if (status !== "1" && status !== "2") continue;
+      const statusLabel = status === "1" ? "已创建" : "正在执行";
+      const meta = codeMetaMap.get(candidateTaskCode) || {};
+      occupiedBy = {
+        agvCode: String(meta.agvCode || ""),
+        taskCode: candidateTaskCode,
+        taskStatus: status,
+        statusLabel,
+        positionCode: blockedPoint,
+      };
+      break;
+    }
+
+    // 二级兜底：部分现场 queryTaskStatus(按taskCode) 不稳定，改按 AGV 查当前任务并反向关联 taskCode
+    if (!occupiedBy) {
+      const uniqueAgvs = Array.from(
+        new Set(
+          Array.from(codeMetaMap.values())
+            .map((m) => String(m && m.agvCode ? m.agvCode : "").trim())
+            .filter(Boolean),
+        ),
+      );
+
+      for (const agv of uniqueAgvs) {
+        try {
+          const statusResp = await fetch(queryUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            timeout: 4000,
+            body: JSON.stringify({
+              reqCode: "sys-agv-" + Date.now() + "-" + agv,
+              agvCode: agv,
+              taskCodes: [""],
+            }),
+          });
+          if (!statusResp.ok) continue;
+          const statusData = await statusResp.json();
+          const rows = Array.isArray(statusData && statusData.data) ? statusData.data : [];
+          const current = rows[0] || null;
+          if (!current) continue;
+
+          const status = String(current.taskStatus || "").trim();
+          if (status !== "1" && status !== "2") continue;
+
+          const currentTaskCode = String(current.taskCode || "").trim();
+          if (!currentTaskCode) continue;
+          // 只在“当前执行任务号”属于这两个站点候选集合时拦截，避免再次误拦截
+          if (!taskCodePointMap.has(currentTaskCode)) continue;
+
+          const statusLabel = status === "1" ? "已创建" : "正在执行";
+          occupiedBy = {
+            agvCode: agv,
+            taskCode: currentTaskCode,
+            taskStatus: status,
+            statusLabel,
+            positionCode: String(taskCodePointMap.get(currentTaskCode) || ""),
+          };
+          break;
+        } catch (e) {
+          console.error("[Occupancy Check] AGV fallback query error for agv " + agv + ":", e.message);
+        }
+      }
+    }
+
+    res.json({
+      ok: true,
+      occupied: !!occupiedBy,
+      occupiedBy: occupiedBy,
+      message: occupiedBy 
+        ? `站点${occupiedBy.positionCode}已有任务(${occupiedBy.taskCode})由AGV(${occupiedBy.agvCode || '-'})处于${occupiedBy.statusLabel}，请稍后重试`
+        : '站点可用'
+    });
+  } catch (err) {
+    console.error("[DB] check-occupancy error:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ── 查询统计数据 ────────────────────────────────────────────────
 app.get("/api/task-stats", async (req, res) => {
   try {
@@ -281,11 +531,13 @@ app.get("/api/task-stats", async (req, res) => {
       FROM task_log
     `);
 
-    // 最近 20 条记录
+    // 当日任务记录
     const recent = await p.request().query(`
-      SELECT TOP 20 req_code, task_typ, position_codes, raw_body, resp_status, resp_body,
+      SELECT req_code, task_typ, position_codes, raw_body, resp_status, resp_body,
              CONVERT(NVARCHAR(19), created_at, 120) AS created_at
       FROM task_log
+      WHERE created_at >= CAST(GETDATE() AS DATE)
+        AND created_at < DATEADD(DAY, 1, CAST(GETDATE() AS DATE))
       ORDER BY id DESC
     `);
 
