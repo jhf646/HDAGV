@@ -109,6 +109,7 @@ async function rebuildPositionCodesTable(dbPool) {
       point_name    NVARCHAR(200) NOT NULL,
       point_code    NVARCHAR(100) NOT NULL UNIQUE,
       point_map     NVARCHAR(50)  NOT NULL,
+      is_active     BIT NOT NULL DEFAULT 0,
       created_at    DATETIME DEFAULT GETDATE(),
       updated_at    DATETIME DEFAULT GETDATE()
     )
@@ -121,8 +122,8 @@ async function rebuildPositionCodesTable(dbPool) {
       .input("point_name", sql.NVarChar(200), row.label)
       .input("point_map", sql.NVarChar(50), row.map || "")
       .query(`
-        INSERT INTO position_code (point_code, point_name, point_map)
-        VALUES (@point_code, @point_name, @point_map)
+        INSERT INTO position_code (point_code, point_name, point_map, is_active)
+        VALUES (@point_code, @point_name, @point_map, 0)
       `);
   }
 
@@ -174,9 +175,19 @@ async function getPool() {
       point_name    NVARCHAR(200) NOT NULL,
       point_code    NVARCHAR(100) NOT NULL UNIQUE,
       point_map     NVARCHAR(50)  NOT NULL,
+      is_active     BIT NOT NULL DEFAULT 0,
       created_at    DATETIME DEFAULT GETDATE(),
       updated_at    DATETIME DEFAULT GETDATE()
     )
+  `);
+
+  // 如已存在表则补充 is_active 列（兼容旧库）
+  await pool.request().query(`
+    IF NOT EXISTS (
+      SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_NAME='position_code' AND COLUMN_NAME='is_active'
+    )
+    ALTER TABLE position_code ADD is_active BIT NOT NULL DEFAULT 0
   `);
 
   const syncResult = await syncPositionCodesToDb(pool);
@@ -241,6 +252,7 @@ app.get("/api/position-codes", async (req, res) => {
     const p = await getPool();
     const result = await p.request().query(`
       SELECT point_name AS label, point_code AS value, point_map AS map,
+             is_active,
              CONVERT(NVARCHAR(19), updated_at, 120) AS updated_at
       FROM position_code
       ORDER BY TRY_CONVERT(INT, point_code), point_code
@@ -283,6 +295,35 @@ app.put("/api/position-codes/:value/label", async (req, res) => {
     res.json({ ok: true, value, label });
   } catch (err) {
     console.error("[DB] update position-code label error:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── 点位配置：切换激活状态 ────────────────────────────────────────
+app.put("/api/position-codes/:value/active", async (req, res) => {
+  try {
+    const value = String(req.params.value || "").trim();
+    const body = req.body || {};
+    if (typeof body.is_active === 'undefined') {
+      return res.status(400).json({ ok: false, error: "缺少 is_active 参数" });
+    }
+    const isActive = body.is_active ? 1 : 0;
+    const p = await getPool();
+    const r = await p
+      .request()
+      .input("point_code", sql.NVarChar(100), value)
+      .input("is_active", sql.Bit, isActive)
+      .query(`
+        UPDATE position_code
+        SET is_active = @is_active, updated_at = GETDATE()
+        WHERE point_code = @point_code
+      `);
+    if (!r.rowsAffected || !r.rowsAffected[0]) {
+      return res.status(404).json({ ok: false, error: "点位编号不存在" });
+    }
+    res.json({ ok: true, value, is_active: isActive });
+  } catch (err) {
+    console.error("[DB] update position-code active error:", err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });

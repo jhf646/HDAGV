@@ -482,7 +482,20 @@
     const defaultTargetIp = String(appConfig.defaultTargetIp || '192.168.111.70:8182');
     const iconPool = ['📦', '🚚', '✅', '📭', '🧭', '⚙️', '📣', '🔔', '🏗️', '🔎', '🤖', '🚨', '🧱', '🪶', '🧷', '🧪', '📬', '⛔'];
     const fieldConfig = appConfig.fieldConfig || {};
+    const staticPositionLabelMap = (() => {
+      const map = {};
+      const list = appConfig?.fieldConfig?.genAgvSchedulingTask?.positionCodePath?.positionCode;
+      if (!Array.isArray(list)) return map;
+      list.forEach(item => {
+        const value = String(item?.value ?? '').trim();
+        const label = String(item?.label ?? '').trim();
+        if (!value) return;
+        map[value] = label || value;
+      });
+      return map;
+    })();
     let dbPositionCodeOptions = [];
+    let dbPositionCodeLoaded = false;
     let currentEndpointIndex = -1;
     let hiddenFieldValues = {};
 
@@ -555,14 +568,14 @@
       if (
         endpointId === 'genAgvSchedulingTask' &&
         arrayKey === 'positionCodePath' &&
-        fieldKey === 'positionCode' &&
-        Array.isArray(dbPositionCodeOptions) &&
-        dbPositionCodeOptions.length > 0
+        fieldKey === 'positionCode'
       ) {
-        return dbPositionCodeOptions.map(item => ({
-          label: String(item.label ?? item.value ?? ''),
-          value: String(item.value ?? item.label ?? '')
-        }));
+        if (dbPositionCodeLoaded) {
+          return dbPositionCodeOptions;
+        }
+        if (Array.isArray(dbPositionCodeOptions) && dbPositionCodeOptions.length > 0) {
+          return dbPositionCodeOptions;
+        }
       }
 
       const configured = fieldConfig?.[endpointId]?.[arrayKey]?.[fieldKey];
@@ -583,6 +596,15 @@
       return fallback;
     }
 
+    function isStrictDbPositionMode(endpointId, arrayKey, fieldKey) {
+      return (
+        endpointId === 'genAgvSchedulingTask' &&
+        arrayKey === 'positionCodePath' &&
+        fieldKey === 'positionCode' &&
+        dbPositionCodeLoaded
+      );
+    }
+
     function getFieldRules(endpointId){
       return fieldConfig?.[endpointId] || {};
     }
@@ -600,6 +622,24 @@
 
     function getFieldDisplayName(endpointId, fieldKey){
       return String(getFieldRules(endpointId)?.displayNames?.[fieldKey] || fieldKey);
+    }
+
+    function resolvePositionLabelByValue(value, label) {
+      const sym = String(value ?? '').trim();
+      const rawLabel = String(label ?? '').trim();
+      const fallback = String(staticPositionLabelMap[sym] || '').trim();
+      if (!rawLabel) return fallback || sym;
+      if (sym && rawLabel === sym && fallback) return fallback;
+      return rawLabel;
+    }
+
+    function formatPositionOptionText(option) {
+      const sym = String(option?.value ?? '').trim();
+      const label = resolvePositionLabelByValue(sym, option?.label);
+      if (!sym && !label) return '';
+      if (!sym) return label;
+      if (!label) return sym;
+      return '#' + sym + ':' + label;
     }
 
     function renderInterfaceList(){
@@ -654,12 +694,15 @@
           const resp = await fetch(base + '/api/position-codes');
           if (!resp.ok) continue;
           const data = await resp.json();
-          if (!data || !data.ok || !Array.isArray(data.rows) || data.rows.length === 0) continue;
-          dbPositionCodeOptions = data.rows.map(item => ({
-            label: String(item.label || ''),
-            value: String(item.value || ''),
-            map: String(item.map || ''),
-          })).filter(item => item.label && item.value);
+          if (!data || !data.ok || !Array.isArray(data.rows)) continue;
+          dbPositionCodeLoaded = true;
+          dbPositionCodeOptions = data.rows
+            .filter(item => item.is_active == 1 || item.is_active === true)
+            .map(item => ({
+              label: String(item.label || ''),
+              value: String(item.value || ''),
+              map: String(item.map || ''),
+            })).filter(item => item.label && item.value);
 
           if (
             fieldConfig?.genAgvSchedulingTask?.positionCodePath &&
@@ -820,15 +863,17 @@
           }
           if (k === 'positionCode' && arrayKey === 'positionCodePath') {
             const options = getPositionCodeOptions(currentEndpointId, arrayKey, k);
+            const strictDbMode = isStrictDbPositionMode(currentEndpointId, arrayKey, k);
             const currentValue = String(item[k] ?? '');
             htmlContent += `<select class="array-item-field" data-field="${k}">`;
             htmlContent += `<option value="">请选择位置</option>`;
             options.forEach(opt => {
               const selected = currentValue === String(opt.value) ? 'selected' : '';
-              htmlContent += `<option value="${escapeHtml(String(opt.value))}" ${selected}>${escapeHtml(String(opt.label))}</option>`;
+              htmlContent += `<option value="${escapeHtml(String(opt.value))}" ${selected}>${escapeHtml(formatPositionOptionText(opt))}</option>`;
             });
-            if (currentValue && !options.some(opt => String(opt.value) === currentValue)) {
-              htmlContent += `<option value="${escapeHtml(currentValue)}" selected>${escapeHtml(currentValue)}</option>`;
+            if (!strictDbMode && currentValue && !options.some(opt => String(opt.value) === currentValue)) {
+              const fallbackLabel = resolvePositionLabelByValue(currentValue, currentValue);
+              htmlContent += `<option value="${escapeHtml(currentValue)}" selected>${escapeHtml('#' + currentValue + ':' + fallbackLabel)}</option>`;
             }
             htmlContent += '</select>';
           } else {

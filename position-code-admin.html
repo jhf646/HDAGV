@@ -43,6 +43,9 @@
       color: #243042;
       padding: 0 12px;
       cursor: pointer;
+      line-height: 1;
+      white-space: nowrap;
+      min-width: 78px;
     }
     .btn.primary {
       border-color: #1976d2;
@@ -109,6 +112,7 @@
       display: flex;
       gap: 6px;
       align-items: center;
+      flex-wrap: nowrap;
     }
     .hint {
       margin-top: 10px;
@@ -119,7 +123,21 @@
       font-size: 12px;
       color: #4f6380;
       min-width: 130px;
+      white-space: nowrap;
     }
+    .active-badge {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .active-badge.active  { background: #d4f7e0; color: #1a7a3c; }
+    .active-badge.inactive { background: #f0f0f0; color: #999; }
+    .btn.success { background: #28a745; color: #fff; }
+    .btn.success:hover { background: #218838; }
+    .btn.danger  { background: #dc3545; color: #fff; }
+    .btn.danger:hover  { background: #c82333; }
   </style>
 </head>
 <body>
@@ -140,10 +158,11 @@
         <table>
           <thead>
             <tr>
-              <th style="width: 36%">点位名称（可编辑）</th>
-              <th style="width: 22%">点位编号（只读）</th>
-              <th style="width: 18%">点位地图（只读）</th>
-              <th style="width: 24%">操作</th>
+              <th style="width: 30%">点位名称（可编辑）</th>
+              <th style="width: 18%">点位编号（只读）</th>
+              <th style="width: 14%">点位地图（只读）</th>
+              <th style="width: 14%">激活状态</th>
+              <th style="width: 30%">操作</th>
             </tr>
           </thead>
           <tbody id="tbody"></tbody>
@@ -191,17 +210,22 @@
 
     function renderRows(rows) {
       if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="4" style="color:#6f8096">暂无数据</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" style="color:#6f8096">暂无数据</td></tr>';
         return;
       }
       tbody.innerHTML = rows.map(function(row){
-        return '<tr data-value="' + escapeHtml(row.value) + '">' +
+        var active = row.is_active == 1 || row.is_active === true;
+        return '<tr data-value="' + escapeHtml(row.value) + '" data-active="' + (active ? '1' : '0') + '">' +
           '<td><input class="label-input" data-role="label" value="' + escapeHtml(row.label) + '" /></td>' +
           '<td class="readonly">' + escapeHtml(row.value) + '</td>' +
           '<td class="readonly">' + escapeHtml(row.map) + '</td>' +
+          '<td><span class="active-badge ' + (active ? 'active' : 'inactive') + '">' +
+            (active ? '已激活' : '未激活') + '</span></td>' +
           '<td>' +
             '<div class="row-actions">' +
-              '<button class="btn primary" data-role="save">保存名称</button>' +
+              '<button class="btn primary" data-role="save" type="button">保存名称</button>' +
+              '<button class="btn ' + (active ? 'danger' : 'success') + '" data-role="toggle-active" type="button">' +
+                (active ? '停用' : '激活') + '</button>' +
               '<span class="status" data-role="status"></span>' +
             '</div>' +
           '</td>' +
@@ -250,6 +274,48 @@
       meta.textContent = '加载失败：' + lastErr;
       allRows = [];
       renderRows([]);
+    }
+
+    async function toggleActive(value, currentActive, statusEl) {
+      if (!currentBase) { statusEl.textContent = '未连接后端'; return; }
+      const newActive = currentActive ? 0 : 1;
+      statusEl.textContent = '处理中...';
+      try {
+        const resp = await fetch(currentBase + '/api/position-codes/' + encodeURIComponent(value) + '/active', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ is_active: newActive })
+        });
+        const data = await resp.json().catch(function(){ return {}; });
+        if (!resp.ok || !data.ok) {
+          if (resp.status === 404) {
+            statusEl.textContent = '失败：后端未更新，请重启 proxy-server.js';
+          } else {
+            statusEl.textContent = '失败：' + String(data.error || ('HTTP ' + resp.status));
+          }
+          return;
+        }
+        const idx = allRows.findIndex(function(r){ return String(r.value) === String(value); });
+        if (idx >= 0) allRows[idx].is_active = newActive;
+        statusEl.textContent = newActive ? '已激活' : '已停用';
+        // 刷新该行 UI
+        const tr = tbody.querySelector('tr[data-value="' + value + '"]');
+        if (tr) {
+          tr.setAttribute('data-active', String(newActive));
+          const badge = tr.querySelector('.active-badge');
+          if (badge) {
+            badge.className = 'active-badge ' + (newActive ? 'active' : 'inactive');
+            badge.textContent = newActive ? '已激活' : '未激活';
+          }
+          const btn = tr.querySelector('[data-role="toggle-active"]');
+          if (btn) {
+            btn.className = 'btn ' + (newActive ? 'danger' : 'success');
+            btn.textContent = newActive ? '停用' : '激活';
+          }
+        }
+      } catch (e) {
+        statusEl.textContent = '失败：' + String(e && e.message ? e.message : e);
+      }
     }
 
     async function saveLabel(value, label, statusEl) {
@@ -325,12 +391,20 @@
 
     tbody.addEventListener('click', function(e){
       const target = e.target;
-      if (!target || target.getAttribute('data-role') !== 'save') return;
+      if (!target) return;
       const tr = target.closest('tr');
       if (!tr) return;
-      const value = tr.getAttribute('data-value') || '';
-      const labelEl = tr.querySelector('[data-role="label"]');
+      const value = tr.getAttribute('data-value');
       const statusEl = tr.querySelector('[data-role="status"]');
+
+      if (target.getAttribute('data-role') === 'toggle-active') {
+        const currentActive = tr.getAttribute('data-active') === '1';
+        toggleActive(value, currentActive, statusEl);
+        return;
+      }
+
+      if (target.getAttribute('data-role') !== 'save') return;
+      const labelEl = tr.querySelector('[data-role="label"]');
       const label = String(labelEl && labelEl.value || '').trim();
       if (!label) {
         statusEl.textContent = '点位名称不能为空';
