@@ -27,10 +27,10 @@ const addressConfig = loadAddressConfig();
 const DB_NAME = "AGV_PDA_LOG";
 const sqlConfig = {
   user: "sa",
-  password: "123456",
-  server: "DESKTOP-L654TSI",
-//  password: "Byt123",
-//  server: "192.168.111.70",
+  // password: "123456",
+  // server: "DESKTOP-L654TSI",
+ password: "Byt123",
+ server: "192.168.111.70",
   database: "master", // 先连 master，建库后切换
   options: {
     encrypt: false,
@@ -190,6 +190,31 @@ async function getPool() {
     ALTER TABLE position_code ADD is_active BIT NOT NULL DEFAULT 0
   `);
 
+  await pool.request().query(`
+    IF NOT EXISTS (
+      SELECT * FROM INFORMATION_SCHEMA.TABLES
+      WHERE TABLE_NAME = 'agv_warn_log'
+    )
+    CREATE TABLE agv_warn_log (
+      id            INT IDENTITY(1,1) PRIMARY KEY,
+      req_code      NVARCHAR(100),
+      req_time      NVARCHAR(40),
+      agv_code      NVARCHAR(100),
+      begin_time    NVARCHAR(40),
+      ed_time       NVARCHAR(40),
+      main_code     NVARCHAR(100),
+      main_name     NVARCHAR(200),
+      sub_code      NVARCHAR(100),
+      sub_name      NVARCHAR(200),
+      map_code      NVARCHAR(100),
+      x_pos         NVARCHAR(60),
+      y_pos         NVARCHAR(60),
+      raw_item      NVARCHAR(MAX),
+      raw_body      NVARCHAR(MAX),
+      created_at    DATETIME DEFAULT GETDATE()
+    )
+  `);
+
   const syncResult = await syncPositionCodesToDb(pool);
   console.log("[DB] position_code synced:", syncResult.synced);
 
@@ -206,6 +231,7 @@ getPool().catch((err) => {
 });
 
 app.use(express.json({ limit: "2mb" }));
+app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname)));
 
 // 添加 CORS 头，允许浏览器直接访问本地代理
@@ -414,6 +440,101 @@ app.post("/api/task-log", async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error("[DB] task-log insert error:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── 告警推送接收（我们是接口提供方，AGV/调度系统回调）──────────────────
+app.post("/service/rest/agvCallbackService/warnCallback", async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const reqCode = String(payload.reqCode || "").trim();
+    const reqTime = String(payload.reqTime || "").trim();
+    const data = Array.isArray(payload.data) ? payload.data : [];
+    const p = await getPool();
+
+    if (data.length === 0) {
+      await p
+        .request()
+        .input("req_code", sql.NVarChar(100), reqCode)
+        .input("req_time", sql.NVarChar(40), reqTime)
+        .input("raw_body", sql.NVarChar(sql.MAX), JSON.stringify(payload || {}))
+        .query(`
+          INSERT INTO agv_warn_log (
+            req_code, req_time, raw_body
+          ) VALUES (
+            @req_code, @req_time, @raw_body
+          )
+        `);
+    } else {
+      for (const item of data) {
+        const row = item || {};
+        await p
+          .request()
+          .input("req_code", sql.NVarChar(100), reqCode)
+          .input("req_time", sql.NVarChar(40), reqTime)
+          .input("agv_code", sql.NVarChar(100), String(row.agvCode || ""))
+          .input("begin_time", sql.NVarChar(40), String(row.beginTime || ""))
+          .input("ed_time", sql.NVarChar(40), String(row.edTime || ""))
+          .input("main_code", sql.NVarChar(100), String(row.mainCode || ""))
+          .input("main_name", sql.NVarChar(200), String(row.mainName || ""))
+          .input("sub_code", sql.NVarChar(100), String(row.subCode || ""))
+          .input("sub_name", sql.NVarChar(200), String(row.subName || ""))
+          .input("map_code", sql.NVarChar(100), String(row.mapCode || ""))
+          .input("x_pos", sql.NVarChar(60), String(row.xPos || ""))
+          .input("y_pos", sql.NVarChar(60), String(row.yPox || row.yPos || ""))
+          .input("raw_item", sql.NVarChar(sql.MAX), JSON.stringify(row))
+          .input("raw_body", sql.NVarChar(sql.MAX), JSON.stringify(payload || {}))
+          .query(`
+            INSERT INTO agv_warn_log (
+              req_code, req_time, agv_code, begin_time, ed_time,
+              main_code, main_name, sub_code, sub_name, map_code,
+              x_pos, y_pos, raw_item, raw_body
+            ) VALUES (
+              @req_code, @req_time, @agv_code, @begin_time, @ed_time,
+              @main_code, @main_name, @sub_code, @sub_name, @map_code,
+              @x_pos, @y_pos, @raw_item, @raw_body
+            )
+          `);
+      }
+    }
+
+    // 按接口文档约定返回
+    res.json({ code: "0", message: "成功" });
+  } catch (err) {
+    console.error("[DB] warn-callback insert error:", err.message);
+    res.status(500).json({ code: "1", message: "失败: " + err.message });
+  }
+});
+
+// ── 告警列表查询 ────────────────────────────────────────────────
+app.get("/api/warn-log", async (req, res) => {
+  try {
+    const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
+    const p = await getPool();
+    const result = await p.request().input("limit", sql.Int, limit).query(`
+      SELECT TOP (@limit)
+        id,
+        req_code,
+        req_time,
+        agv_code,
+        begin_time,
+        ed_time,
+        main_code,
+        main_name,
+        sub_code,
+        sub_name,
+        map_code,
+        x_pos,
+        y_pos,
+        CONVERT(NVARCHAR(19), created_at, 120) AS created_at,
+        raw_item
+      FROM agv_warn_log
+      ORDER BY id DESC
+    `);
+    res.json({ ok: true, rows: result.recordset || [] });
+  } catch (err) {
+    console.error("[DB] warn-log query error:", err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });

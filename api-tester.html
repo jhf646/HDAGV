@@ -207,6 +207,14 @@
       gap: 6px;
       align-items: center;
     }
+    .array-point-role {
+      min-width: 56px;
+      font-size: 13px;
+      color: #44536b;
+      font-weight: 600;
+      text-align: right;
+      flex: none;
+    }
     .array-item input,
     .array-item select {
       flex: 1;
@@ -391,6 +399,7 @@
         <button id="backBtn" class="back-btn" type="button">返回</button>
         <button id="statsBtn" class="stats-btn" type="button">📊 统计</button>
         <button id="agvStatusBtn" class="stats-btn" type="button">🤖 AGV任务状态</button>
+        <button id="warnStatusBtn" class="stats-btn" type="button">🚨 告警推送</button>
         <button id="positionCodeBtn" class="stats-btn" type="button">📍 点位配置</button>
         <div id="detailTitle" class="detail-title">接口详情</div>
       </div>
@@ -806,7 +815,9 @@
       const labelName = getFieldDisplayName(endpointId, key);
       const row = document.createElement('div');
       row.className = 'json-field-row';
-      let html = `<label>${escapeHtml(labelName)}:</label><select class="json-value" data-key="${key}">`;
+      const isAutoTaskType = endpointId === 'genAgvSchedulingTask' && key === 'taskTyp';
+      const disabledAttr = isAutoTaskType ? 'disabled title="自动判定"' : '';
+      let html = `<label>${escapeHtml(labelName)}:</label><select class="json-value" data-key="${key}" ${disabledAttr}>`;
       options.forEach(option => {
         const selected = String(selectedValue) === String(option.value) ? 'selected' : '';
         html += `<option value="${escapeHtml(String(option.value))}" ${selected}>${escapeHtml(String(option.label))}</option>`;
@@ -814,9 +825,11 @@
       html += `</select>`;
       row.innerHTML = html;
 
-      row.querySelector('.json-value').addEventListener('change', () => {
-        updateJsonBody();
-      });
+      if (!isAutoTaskType) {
+        row.querySelector('.json-value').addEventListener('change', () => {
+          updateJsonBody();
+        });
+      }
 
       container.appendChild(row);
     }
@@ -865,6 +878,10 @@
             const options = getPositionCodeOptions(currentEndpointId, arrayKey, k);
             const strictDbMode = isStrictDbPositionMode(currentEndpointId, arrayKey, k);
             const currentValue = String(item[k] ?? '');
+            const pointRoleText = itemIdx === 0 ? '送货点' : (itemIdx === 1 ? '收货点' : '');
+            if (pointRoleText) {
+              htmlContent += `<span class="array-point-role">${pointRoleText}</span>`;
+            }
             htmlContent += `<select class="array-item-field" data-field="${k}">`;
             htmlContent += `<option value="">请选择位置</option>`;
             options.forEach(opt => {
@@ -1530,6 +1547,11 @@
         'agv-status.html?apiHost=' + encodeURIComponent(base) + '&targetIp=' + encodeURIComponent(targetIp),
         '_blank',
       );
+    });
+
+    document.getElementById('warnStatusBtn').addEventListener('click', () => {
+      const base = getConfiguredBackendBaseUrl() || window.location.origin || 'http://localhost:3000';
+      window.open('warn-status.html?apiHost=' + encodeURIComponent(base), '_blank');
     });
 
     document.getElementById('positionCodeBtn').addEventListener('click', () => {

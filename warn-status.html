@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AGV告警推送看板</title>
+  <style>
+    :root {
+      --bg: #f4f6fb;
+      --card: #ffffff;
+      --text: #1b2a4a;
+      --muted: #66738a;
+      --line: #dde3ef;
+      --ok: #0c8a43;
+      --warn: #b84a00;
+      --brand: #1e63ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+      color: var(--text);
+      background: radial-gradient(circle at top right, #eaf1ff 0%, var(--bg) 45%);
+      min-height: 100vh;
+      padding: 16px;
+    }
+    .wrap {
+      max-width: 1280px;
+      margin: 0 auto;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 10px 24px rgba(24, 61, 140, 0.08);
+    }
+    .head {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(90deg, #ffffff, #f6f9ff);
+      flex-wrap: wrap;
+    }
+    .title { font-weight: 700; }
+    .tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    button {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      border-radius: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+    }
+    button.primary {
+      border-color: #2e68ff;
+      background: #2e68ff;
+      color: #fff;
+    }
+    .status {
+      font-size: 12px;
+      color: var(--muted);
+      padding: 8px 16px;
+      border-bottom: 1px dashed var(--line);
+    }
+    .table-wrap { overflow: auto; max-height: calc(100vh - 170px); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      min-width: 1100px;
+    }
+    th, td {
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      text-align: left;
+      white-space: nowrap;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      background: #f8faff;
+      z-index: 1;
+      color: #40506f;
+    }
+    td.raw {
+      white-space: pre-wrap;
+      max-width: 360px;
+      color: #3a4661;
+      line-height: 1.35;
+    }
+    .badge {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 12px;
+      background: #fff5ed;
+      color: var(--warn);
+      border: 1px solid #ffd8bf;
+    }
+    .muted { color: var(--muted); }
+    .detail-btn {
+      border: 1px solid #bfd2ff;
+      background: #eef4ff;
+      color: #1b49b8;
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .dialog-mask {
+      position: fixed;
+      inset: 0;
+      background: rgba(17, 27, 51, 0.45);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 999;
+      padding: 16px;
+    }
+    .dialog {
+      width: min(920px, 96vw);
+      max-height: 86vh;
+      overflow: hidden;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #fff;
+      box-shadow: 0 14px 40px rgba(22, 44, 98, 0.18);
+    }
+    .dialog-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      font-weight: 700;
+    }
+    .dialog-body {
+      max-height: calc(86vh - 48px);
+      overflow: auto;
+      padding: 10px 12px;
+      background: #f9fbff;
+    }
+    .dialog-body pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: #26344f;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="head">
+      <div class="title">AGV告警推送看板</div>
+      <div class="tools">
+        <button id="refreshBtn" class="primary" type="button">刷新</button>
+        <button id="toggleBtn" type="button">暂停自动刷新</button>
+      </div>
+    </div>
+    <div class="status" id="statusText">准备加载...</div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>接收时间</th>
+            <th>请求号</th>
+            <th>AGV</th>
+            <th>主告警</th>
+            <th>子告警</th>
+            <th>地图</th>
+            <th>开始时间</th>
+            <th>结束时间</th>
+            <th>坐标</th>
+            <th>原始条目</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="detailMask" class="dialog-mask">
+    <div class="dialog">
+      <div class="dialog-head">
+        <span>告警原始条目</span>
+        <button id="closeDetailBtn" type="button">关闭</button>
+      </div>
+      <div class="dialog-body">
+        <pre id="detailContent">-</pre>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function normalizeBaseUrl(value) {
+      var v = String(value || '').trim();
+      if (!v) return '';
+      if (/^https?:\/\//i.test(v)) return v.replace(/\/$/, '');
+      return ('http://' + v).replace(/\/$/, '');
+    }
+
+    function getApiCandidates() {
+      var list = [];
+      var q = new URLSearchParams(window.location.search).get('apiHost');
+      var qBase = normalizeBaseUrl(q);
+      if (qBase) list.push(qBase + '/api/warn-log');
+      if (window.location.origin) list.push(window.location.origin.replace(/\/$/, '') + '/api/warn-log');
+      if (window.location.hostname) list.push('http://' + window.location.hostname + ':3000/api/warn-log');
+      list.push('http://127.0.0.1:3000/api/warn-log');
+      list.push('http://localhost:3000/api/warn-log');
+      return Array.from(new Set(list));
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    var timer = null;
+    var autoRefresh = true;
+    var currentRows = [];
+
+    function setStatus(text) {
+      document.getElementById('statusText').textContent = text;
+    }
+
+    function render(rows) {
+      var tbody = document.getElementById('tbody');
+      if (!Array.isArray(rows) || rows.length === 0) {
+        currentRows = [];
+        tbody.innerHTML = '<tr><td colspan="10" class="muted">暂无告警记录</td></tr>';
+        return;
+      }
+
+      currentRows = rows.slice();
+
+      tbody.innerHTML = rows.map(function (r, idx) {
+        var point = (r.x_pos || '-') + ',' + (r.y_pos || '-');
+        var canDetail = !!r.raw_item;
+        return '<tr>' +
+          '<td>' + escapeHtml(r.created_at || '-') + '</td>' +
+          '<td>' + escapeHtml(r.req_code || '-') + '</td>' +
+          '<td><span class="badge">' + escapeHtml(r.agv_code || '-') + '</span></td>' +
+          '<td>' + escapeHtml((r.main_code || '-') + ' / ' + (r.main_name || '-')) + '</td>' +
+          '<td>' + escapeHtml((r.sub_code || '-') + ' / ' + (r.sub_name || '-')) + '</td>' +
+          '<td>' + escapeHtml(r.map_code || '-') + '</td>' +
+          '<td>' + escapeHtml(r.begin_time || '-') + '</td>' +
+          '<td>' + escapeHtml(r.ed_time || '-') + '</td>' +
+          '<td>' + escapeHtml(point) + '</td>' +
+          '<td class="raw">' +
+            (canDetail ? ('<button type="button" class="detail-btn" data-idx="' + idx + '">详细</button>') : '<span class="muted">-</span>') +
+          '</td>' +
+        '</tr>';
+      }).join('');
+
+      tbody.querySelectorAll('.detail-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var idx = Number(this.getAttribute('data-idx') || -1);
+          openDetailByIndex(idx);
+        });
+      });
+    }
+
+    function openDetailByIndex(idx) {
+      var row = currentRows[idx];
+      var raw = row ? row.raw_item : '';
+      var text = '-';
+      if (raw) {
+        try {
+          text = JSON.stringify(JSON.parse(raw), null, 2);
+        } catch (e) {
+          text = String(raw);
+        }
+      }
+      document.getElementById('detailContent').textContent = text;
+      document.getElementById('detailMask').style.display = 'flex';
+    }
+
+    function closeDetailDialog() {
+      document.getElementById('detailMask').style.display = 'none';
+    }
+
+    async function loadWarnLogs() {
+      var urls = getApiCandidates();
+      var lastErr = '';
+      for (var i = 0; i < urls.length; i += 1) {
+        var url = urls[i];
+        try {
+          var resp = await fetch(url + '?limit=200', { cache: 'no-store' });
+          if (!resp.ok) {
+            lastErr = url + ' HTTP ' + resp.status;
+            continue;
+          }
+          var data = await resp.json();
+          if (!data || data.ok !== true || !Array.isArray(data.rows)) {
+            lastErr = url + ' 返回格式异常';
+            continue;
+          }
+          render(data.rows);
+          setStatus('已连接: ' + url + '，记录数: ' + data.rows.length + '，更新时间: ' + new Date().toLocaleString());
+          return;
+        } catch (e) {
+          lastErr = url + ' ' + String(e && e.message ? e.message : e);
+        }
+      }
+      setStatus('加载失败: ' + (lastErr || '无可用地址'));
+      render([]);
+    }
+
+    function startTimer() {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+      if (!autoRefresh) return;
+      timer = setInterval(loadWarnLogs, 10000);
+    }
+
+    document.getElementById('refreshBtn').addEventListener('click', loadWarnLogs);
+    document.getElementById('toggleBtn').addEventListener('click', function () {
+      autoRefresh = !autoRefresh;
+      this.textContent = autoRefresh ? '暂停自动刷新' : '开启自动刷新';
+      startTimer();
+    });
+    document.getElementById('closeDetailBtn').addEventListener('click', closeDetailDialog);
+    document.getElementById('detailMask').addEventListener('click', function (e) {
+      if (e.target && e.target.id === 'detailMask') {
+        closeDetailDialog();
+      }
+    });
+
+    loadWarnLogs();
+    startTimer();
+  </script>
+</body>
+</html>
