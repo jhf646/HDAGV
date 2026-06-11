@@ -27,10 +27,10 @@ const addressConfig = loadAddressConfig();
 const DB_NAME = "AGV_PDA_LOG";
 const sqlConfig = {
   user: "sa",
-  password: "123456",
-  server: "DESKTOP-L654TSI",
-//  password: "Byt123",
-//  server: "192.168.111.70",
+  // password: "123456",
+  // server: "DESKTOP-L654TSI",
+ password: "Byt123",
+ server: "192.168.111.70",
   database: "master", // 先连 master，建库后切换
   options: {
     encrypt: false,
@@ -832,6 +832,12 @@ app.post("/api/task-log/check-occupancy", async (req, res) => {
 // ── 查询统计数据 ────────────────────────────────────────────────
 app.get("/api/task-stats", async (req, res) => {
   try {
+    const startDate = String((req.query || {}).startDate || "").trim();
+    const endDate = String((req.query || {}).endDate || "").trim();
+    const dateReg = /^\d{4}-\d{2}-\d{2}$/;
+    const safeStart = dateReg.test(startDate) ? startDate : "";
+    const safeEnd = dateReg.test(endDate) ? endDate : "";
+
     const p = await getPool();
 
     // 最近 30 天每天任务量
@@ -862,21 +868,40 @@ app.get("/api/task-stats", async (req, res) => {
       FROM task_log
     `);
 
-    // 当日任务记录
-    const recent = await p.request().query(`
+    // 任务记录：默认当日；若传 startDate/endDate 则按日期范围查询
+    let recentSql = `
       SELECT req_code, task_typ, position_codes, raw_body, resp_status, resp_body,
              CONVERT(NVARCHAR(19), created_at, 120) AS created_at
       FROM task_log
-      WHERE created_at >= CAST(GETDATE() AS DATE)
-        AND created_at < DATEADD(DAY, 1, CAST(GETDATE() AS DATE))
-      ORDER BY id DESC
-    `);
+      WHERE 1=1
+    `;
+    const recentReq = p.request();
+    if (safeStart) {
+      recentSql += `\n AND created_at >= CAST(@start_date AS DATE)`;
+      recentReq.input("start_date", sql.NVarChar(10), safeStart);
+    }
+    if (safeEnd) {
+      recentSql += `\n AND created_at < DATEADD(DAY, 1, CAST(@end_date AS DATE))`;
+      recentReq.input("end_date", sql.NVarChar(10), safeEnd);
+    }
+    if (!safeStart && !safeEnd) {
+      recentSql += `\n AND created_at >= CAST(GETDATE() AS DATE)`;
+      recentSql += `\n AND created_at < DATEADD(DAY, 1, CAST(GETDATE() AS DATE))`;
+    }
+    recentSql += `\n ORDER BY id DESC`;
+
+    const recent = await recentReq.query(recentSql);
 
     res.json({
       byDay: byDay.recordset,
       byTyp: byTyp.recordset,
       byStatus: byStatus.recordset[0],
       recent: recent.recordset,
+      query: {
+        startDate: safeStart || null,
+        endDate: safeEnd || null,
+        mode: safeStart || safeEnd ? "range" : "today",
+      },
     });
   } catch (err) {
     console.error("[DB] task-stats error:", err.message);

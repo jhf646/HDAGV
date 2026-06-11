@@ -504,27 +504,13 @@ function isDateInRange(dateStr, startDate, endDate) {
 }
 
 function applyDateFilter() {
-  const startInput = document.getElementById('startDateInput').value;
-  const endInput = document.getElementById('endDateInput').value;
-  const startDate = startInput ? new Date(startInput) : null;
-  const endDate = endInput ? new Date(endInput) : null;
-  
-  if (!startDate && !endDate) {
-    filteredTaskRecords = Array.from(allTaskRecords);
-  } else {
-    filteredTaskRecords = allTaskRecords.filter(r => {
-      return isDateInRange(String(r.created_at || ''), startDate, endDate);
-    });
-  }
-  
-  renderTaskRecordRows(filteredTaskRecords, taskStatusMapCache);
+  loadTaskRecords();
 }
 
 function resetDateFilter() {
   document.getElementById('startDateInput').value = '';
   document.getElementById('endDateInput').value = '';
-  filteredTaskRecords = Array.from(allTaskRecords);
-  renderTaskRecordRows(filteredTaskRecords, taskStatusMapCache);
+  loadTaskRecords();
 }
 
 function exportToExcel() {
@@ -632,12 +618,19 @@ function renderTaskRecordRows(rows, taskStatusMap) {
 async function loadTaskRecords() {
   const metaEl = document.getElementById('taskRecordMeta');
   metaEl.textContent = '加载中...';
+  const startDate = String(document.getElementById('startDateInput')?.value || '').trim();
+  const endDate = String(document.getElementById('endDateInput')?.value || '').trim();
+  const hasDateFilter = !!(startDate || endDate);
   const candidates = getTaskStatsCandidates();
   let lastError = '';
 
   for (const url of candidates) {
     try {
-      const resp = await fetch(url);
+      const apiUrl = new URL(url, window.location.origin);
+      if (startDate) apiUrl.searchParams.set('startDate', startDate);
+      if (endDate) apiUrl.searchParams.set('endDate', endDate);
+
+      const resp = await fetch(apiUrl.toString());
       if (!resp.ok) {
         lastError = 'HTTP ' + resp.status;
         continue;
@@ -659,7 +652,10 @@ async function loadTaskRecords() {
       taskStatusMapCache = statusMap;
       renderTaskRecordRows(rows, statusMap);
       const syncedCount = Object.keys(statusMap).length;
-      metaEl.textContent = '已更新: ' + new Date().toLocaleTimeString('zh-CN') + ' | ' + rows.length + ' 条 | 状态同步 ' + syncedCount + ' 条';
+      const rangeText = hasDateFilter
+        ? (' | 日期: ' + (startDate || '不限') + ' 至 ' + (endDate || '不限'))
+        : ' | 日期: 当日';
+      metaEl.textContent = '已更新: ' + new Date().toLocaleTimeString('zh-CN') + ' | ' + rows.length + ' 条 | 状态同步 ' + syncedCount + ' 条' + rangeText;
       return;
     } catch (e) {
       lastError = String(e && e.message ? e.message : e);
