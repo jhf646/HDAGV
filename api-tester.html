@@ -1121,6 +1121,12 @@
         };
       }
 
+      if (toMap === 'CC') {
+        return {
+          taskTyp: 'A120',
+          floorTypeText: '三楼搬运任务',
+        };
+      }
       const isSameFloor = fromMap === toMap;
       return {
         taskTyp: isSameFloor ? 'A01' : 'A12',

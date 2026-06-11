@@ -27,10 +27,10 @@ const addressConfig = loadAddressConfig();
 const DB_NAME = "AGV_PDA_LOG";
 const sqlConfig = {
   user: "sa",
-  // password: "123456",
-  // server: "DESKTOP-L654TSI",
- password: "Byt123",
- server: "192.168.111.70",
+  password: "123456",
+  server: "DESKTOP-L654TSI",
+//  password: "Byt123",
+//  server: "192.168.111.70",
   database: "master", // 先连 master，建库后切换
   options: {
     encrypt: false,

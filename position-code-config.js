@@ -59,6 +59,7 @@ window.AGV_APP_CONFIG = {
         taskTyp: [
           { label: "同楼层搬运任务", value: "A01" },
           { label: "跨楼层搬运任务", value: "A12" },
+          { label: "跨楼层搬运小车自动返回任务", value: "A120" },
           //   { label: '跨楼层搬运任务', value: 'A1000' },
         ],
       },
@@ -141,6 +142,8 @@ window.AGV_APP_CONFIG = {
           { label: "待修改", value: "18001", map: "AB" },
           { label: "待修改", value: "19001", map: "AB" },
           { label: "待修改", value: "19002", map: "AB" },
+          { label: "待修改", value: "20001", map: "CC" },
+          { label: "待修改", value: "20002", map: "CC" },
         ],
       },
     },
